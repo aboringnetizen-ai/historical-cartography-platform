@@ -16,23 +16,20 @@
   },
   "current_handoff": {
     "branch": "backend/core",
-    "verified_commit": "ad4ee8c30715fb769578939a8f417fc26b4983ad",
-    "status": "草稿拓扑、单弧段 G1.5、变更集证据固定、微单元移交与回滚已在真实数据库复跑。",
+    "verified_commit": "9f29f7fa9045d19aae9c14b92a84ee58bba3f4c0",
+    "status": "草稿与史料首版已联验。真实引文可打开草稿与送审，原件变更后旧送审失效并阻止再次送审。",
     "documentation": "packages/topo-core/README.md",
     "integration_trial_branch": "integration/core-studio",
-    "integration_trial_commit": "3f68d241b1d7cb7dfa0320cbf2371ee0d45bc5ff"
+    "integration_trial_commit": "3f68d241b1d7cb7dfa0320cbf2371ee0d45bc5ff",
+    "scholar_integration_branch": "integration/core-scholar-studio",
+    "scholar_integration_verified_commit": "b84ed7a9d3645cadbe8bfd083235f259277bbffa"
   },
   "packages": {
     "shared-schema": {
       "owner": "Codex",
       "phase": 0,
       "status": "accepted",
-      "implemented": [
-        "Canonical Schema v4.0",
-        "双纪年与日期精度工具",
-        "硬门禁编号与结果类型",
-        "地图和证据服务类型与交接样例"
-      ],
+      "implemented": ["Canonical Schema v4.0", "双纪年与日期精度工具", "硬门禁编号与结果类型", "地图和证据服务类型与交接样例"],
       "remaining": []
     },
     "topo-core": {
@@ -46,12 +43,13 @@
         "时代古地理参考线登记与整段吸附",
         "保留骨架和端点的有界平滑预览及单弧段 G1.5，含分形维数、微折角、邻边和地标归属",
         "绑定真实证据读取接口的变更集草稿与事件版本固定、再核验",
-        "微单元草稿移交、人工锁定、乐观并发控制、审计事件与回滚"
+        "微单元草稿移交、人工锁定、乐观并发控制、审计事件与回滚",
+        "受草稿头与人工锁保护的送审事务，调用真实 ScholarEvents 并在证据失效时撤销旧送审"
       ],
       "remaining": [
         "变更集多弧段组合校验、正式审核与提交",
         "子段自然吸附、边界移动、空间差异、历史回滚与编辑 MCP",
-        "与真实史料服务联调供正式定稿使用的 T1 样本",
+        "正式地图写入时再次核对真实史料、人工审批与空间门禁",
         "与工作台统一 HTTP 场景读模型及附属资料来源",
         "有真实史料的 928 年黄金用例"
       ]
@@ -59,27 +57,26 @@
     "scholar-agent": {
       "owner": "WorkBuddy 6.2 Astra",
       "phase": 2,
-      "status": "in_progress",
+      "status": "review",
       "branch": "backend/scholar",
+      "handoff_commit": "15e1ba91a9f8bbf7c8d41624d65646b57cc75114",
       "implemented": [
-        "Internet Archive、Crossref、显式本地文件清单检索",
-        "真实英文图注 OCR、页行与 BBox、原生文本索引",
-        "按原件和索引修订核验引文",
-        "SQLite 事件登记和 EventEvidenceReader（拒绝过期版本、错引和自动解除 T1 分歧）",
-        "受信编目分级、脚注图遍历及五维研究候选；分歧保留双方引文与修订",
-        "stdio 五项文献工具（配置白名单、编目及事件数据库后启用全套）"
+        "Internet Archive、Crossref 和授权本地清单检索",
+        "真实英文图注 OCR、页行索引与 BBox、原生文本索引",
+        "受信编目、文件与索引版本核验、脚注候选和 SQLite 事件版本",
+        "五项 stdio 文献工具及 EventEvidenceReader；达尔文转录本已通过空间送审联合测试"
       ],
       "evidence_paths": [
         "packages/scholar-agent/fixtures/search-live.json",
         "packages/scholar-agent/fixtures/ocr-live.json",
         "packages/scholar-agent/fixtures/voyage-source.json",
-        "packages/scholar-agent/test"
+        "test/scholar-topology.integration.ts"
       ],
       "remaining": [
-        "中文竖排、横排和多语论文真实样本；旋转旧图验收",
-        "真实脚注自动提取与五维史学样本；人工裁决版本闭环",
-        "跨进程持久索引恢复与稳定 RPC 联调",
-        "与 topo-core 联验 A-13、A-23、A-40；G3 未联合签收"
+        "中文竖排、横排、多语论文和旋转旧图真实 OCR 样本",
+        "真实脚注、五维考证和人工裁决闭环",
+        "持久索引重启恢复、跨进程联调及正式写入验收",
+        "A-40 的 928 年相关 T1 资料与地点归属"
       ]
     },
     "carto-studio-web": {
@@ -87,26 +84,15 @@
       "reviewer": "Claude",
       "phase": 3,
       "status": "review",
-      "implemented": [
-        "Gemini 在 frontend/studio 提交工作台、风格、时间轴、证据与导播界面，已在试集成分支通过测试和打包"
-      ],
-      "remaining": [
-        "统一真实服务场景响应和修订索引",
-        "真实证据与差异联调",
-        "浏览器视觉复查与导出验收"
-      ]
+      "implemented": ["Gemini 在 frontend/studio 提交工作台、风格、时间轴、证据与导播界面，已在试集成分支通过测试和打包"],
+      "remaining": ["统一真实服务场景响应和修订索引", "真实证据与差异联调", "浏览器视觉复查与导出验收"]
     },
     "video-renderer": {
       "owner": "Codex",
       "phase": 4,
       "status": "planned",
       "implemented": [],
-      "remaining": [
-        "分镜与遥测",
-        "拓扑过渡",
-        "确定性渲染及双画幅烟测",
-        "FFmpeg 编码与发布资产"
-      ]
+      "remaining": ["分镜与遥测", "拓扑过渡", "确定性渲染及双画幅烟测", "FFmpeg 编码与发布资产"]
     }
   },
   "latest_verification": [
@@ -169,14 +155,19 @@
       "acceptance": "编译、数据库和打包联检完成。工作台还以演示场景为主，真实 HTTP 场景与浏览器验收待办。"
     },
     {
-      "command": "npm run check",
+      "command": "npm ci && npm run check && npm run test:postgis --workspace @historical-cartography/topo-core && npm run test:scholar-topology && npm run build --workspace @historical-cartography/carto-studio-web",
       "date": "2026-11-22",
-      "source": "backend/scholar 分支，集成前",
-      "environment": "Windows / Node 22.22.2 / Tesseract 5.4.0（eng、osd）",
       "result": "PASS",
-      "summary": "类型检查及 21 项测试通过，0 跳过。含真实达尔文转录本和实际英文图像 OCR；缺语种、合成脚注和合成争议不是史学验收。",
-      "acceptance": "包级工作切片，非 A-20 至 A-23 整体签收；未接入空间事务。",
-      "commit": "15e1ba91a9f8bbf7c8d41624d65646b57cc75114"
+      "environment": "干净 Windows 检出，Node v24.19.0，PostgreSQL 17.10 与 PostGIS 3.7.0；Tesseract 英文模型",
+      "source": "联合验证分支的固定提交",
+      "commit": "b84ed7a9d3645cadbe8bfd083235f259277bbffa",
+      "summary": "类型检查、27 项常规测试、20 项 PostGIS 测试、1 项真实史料跨包测试及前端打包通过；全部测试无跳过。",
+      "input_sha256": {
+        "packages/scholar-agent/fixtures/voyage-excerpt.txt": "2b22332de5962857216b522f16821c827e9c132252a00b144864368aa1d81b3b",
+        "test/scholar-topology.integration.ts": "75e1989752a4e0b393a24feb05d8fcf7d4df51c03ce8f49f5f30a8a9a06e92bb",
+        "packages/topo-core/src/review-submission.ts": "b5e1e9146df04e5b826bb107e2c49e324986a435f6b9fb23c3dbbeda7e4e1149"
+      },
+      "acceptance": "真实 T1 文本送审及 G3 版本失配拒绝的联合子项通过，正式地图发布、928 年史实验收和其他语种 OCR 待办。"
     }
   ],
   "source_review_smoke": {
@@ -200,63 +191,35 @@
       "owner": "Codex",
       "status": "review",
       "next_action": "在 backend/core 上由消费者用实际草稿快照接口核对地图接入。A-10 与 A-11 的正式事务用例由 C-03/C-04 补齐。",
-      "acceptance_ids": [
-        "A-10",
-        "A-11"
-      ]
+      "acceptance_ids": ["A-10", "A-11"]
     },
     {
       "task_id": "C-02",
       "owner": "Codex",
       "status": "review",
       "next_action": "在 C-03/C-04 中联调多弧段组合校验，用真实时代资料与地标复验。",
-      "acceptance_ids": [
-        "A-11",
-        "A-12"
-      ]
+      "acceptance_ids": ["A-11", "A-12"]
     },
     {
       "task_id": "C-03",
       "owner": "Codex",
       "status": "in_progress",
-      "next_action": "继续实现空间边界编辑与可审阅的差异，接入真实证据和正式提交门禁。变更集草稿、移交及回滚已通过测试。",
-      "acceptance_ids": [
-        "A-10",
-        "A-13",
-        "A-14"
-      ]
+      "next_action": "继续实现边界编辑与可审阅的差异，并沿送审时的原件复核方式接入正式提交门禁。",
+      "acceptance_ids": ["A-10", "A-13", "A-14"]
     },
     {
       "task_id": "C-05",
       "owner": "Codex",
       "status": "in_progress",
-      "next_action": "对齐工作台场景接口，与后端 AI 2 固定可复查的 T1 来源及 928 年相关事件；不同年代解释保持待考证。",
-      "acceptance_ids": [
-        "A-40",
-        "A-50"
-      ]
+      "next_action": "与 WorkBuddy 固定 928 年相关 T1 材料，核对真实地点归属；与 Gemini 对齐工作台场景接口。真转录本的送审联验已通过。",
+      "acceptance_ids": ["A-40", "A-50"]
     }
   ],
   "next_tasks": [
-    {
-      "task_id": "C-03",
-      "owner": "Codex"
-    },
-    {
-      "task_id": "C-04",
-      "owner": "Codex"
-    },
-    {
-      "task_id": "C-05",
-      "owner": "Codex"
-    },
-    {
-      "task_id": "S-04",
-      "owner": "WorkBuddy 6.2 Astra"
-    },
-    {
-      "task_id": "F-03",
-      "owner": "Gemini"
-    }
+    {"task_id": "C-03", "owner": "Codex"},
+    {"task_id": "C-04", "owner": "Codex"},
+    {"task_id": "C-05", "owner": "Codex"},
+    {"task_id": "S-04", "owner": "WorkBuddy 6.2 Astra"},
+    {"task_id": "F-03", "owner": "Gemini"}
   ]
 }
