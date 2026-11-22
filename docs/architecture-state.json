@@ -16,9 +16,11 @@
   },
   "current_handoff": {
     "branch": "backend/core",
-    "verified_commit": "09fedd2c0c04aac27f85b26ab753a9c181eb3169",
-    "status": "阶段一的草稿拓扑、古地理整段吸附与只读平滑预览已在真实数据库复跑。",
-    "documentation": "packages/topo-core/README.md"
+    "verified_commit": "ad4ee8c30715fb769578939a8f417fc26b4983ad",
+    "status": "草稿拓扑、单弧段 G1.5、变更集证据固定、微单元移交与回滚已在真实数据库复跑。",
+    "documentation": "packages/topo-core/README.md",
+    "integration_trial_branch": "integration/core-studio",
+    "integration_trial_commit": "3f68d241b1d7cb7dfa0320cbf2371ee0d45bc5ff"
   },
   "packages": {
     "shared-schema": {
@@ -37,29 +39,32 @@
         "共享弧段、面种子、覆盖检验和只读地图快照",
         "失败原子回滚与向前迁移",
         "时代古地理参考线登记与整段吸附",
-        "保留骨架和端点的有界平滑预览"
+        "保留骨架和端点的有界平滑预览及单弧段 G1.5，含分形维数、微折角、邻边和地标归属",
+        "绑定真实证据读取接口的变更集草稿与事件版本固定、再核验",
+        "微单元草稿移交、人工锁定、乐观并发控制、审计事件与回滚"
       ],
       "remaining": [
-        "G1.5 的分形维数、微折角、邻边与地标联动",
-        "事件绑定的 ChangeSet 编辑、证据核验、锁定和审核",
-        "子段自然吸附、空间差异、正式提交、历史回滚与编辑 MCP",
+        "变更集多弧段组合校验、正式审核与提交",
+        "子段自然吸附、边界移动、空间差异、历史回滚与编辑 MCP",
+        "与真实史料服务联调供正式定稿使用的 T1 样本",
+        "与工作台统一 HTTP 场景读模型及附属资料来源",
         "有真实史料的 928 年黄金用例"
       ]
     },
     "scholar-agent": {
       "owner": "后端 AI 2",
       "phase": 2,
-      "status": "planned",
-      "implemented": [],
-      "remaining": ["检索和导入", "OCR 页行索引", "信源分级", "引文核验与事件接口", "文献 MCP"]
+      "status": "in_progress",
+      "implemented": ["backend/scholar 工作树有实际文本索引与指定页行核验代码，已试跑公开史料摘录的候选与拒绝分支"],
+      "remaining": ["同一固定提交交接检索及 OCR 验收", "可信 T1 审阅及 EventEvidenceReader 联调", "正式 G3 与文献 MCP 验收"]
     },
     "carto-studio-web": {
       "owner": "Gemini",
       "reviewer": "Claude",
       "phase": 3,
-      "status": "planned",
-      "implemented": [],
-      "remaining": ["地图与图层", "风格与时间轴", "证据和差异界面", "导播和 HUD 编辑"]
+      "status": "review",
+      "implemented": ["Gemini 在 frontend/studio 提交工作台、风格、时间轴、证据与导播界面，已在试集成分支通过测试和打包"],
+      "remaining": ["统一真实服务场景响应和修订索引", "真实证据与差异联调", "浏览器视觉复查与导出验收"]
     },
     "video-renderer": {
       "owner": "Codex",
@@ -100,8 +105,42 @@
         "packages/topo-core/test/postgis.integration.ts": "51e3a50e69cf820063aca3f88a730cb634730bf53593549fc4553f5a9208914c"
       },
       "acceptance": "A-10、A-11 和 A-12 的草稿拓扑子项通过，项目级门禁待正式编辑、地标和史料集成。"
+    },
+    {
+      "command": "npm run check && npm run test:postgis --workspace @historical-cartography/topo-core",
+      "date": "2026-11-22",
+      "result": "PASS",
+      "environment": "本地 Windows，Node v24.19.0，PostgreSQL 17.10，PostGIS 与 PostGIS Topology 3.7.0",
+      "source": "固定提交的干净检出和隔离的真实数据库",
+      "commit": "ad4ee8c30715fb769578939a8f417fc26b4983ad",
+      "summary": "类型检查、4 项纪年测试、18 项数据库集成测试通过。",
+      "input_sha256": {
+        "packages/topo-core/migrations/003_smoothing_checks.sql": "0e58f561287f91f56d765239abc562d5f0f6d6a31f78c3ba904f6aae3bb3a24d",
+        "packages/topo-core/migrations/004_open_changesets.sql": "3e9e7569b116be2f08153e61fa1cc89464660e694e88fe14e7458e8f51b0b522",
+        "packages/topo-core/migrations/005_draft_unit_operations.sql": "a5dc80c55ff2ac9fd3f20876566adbe7e6f5c21f9d0db7d498e2994704fed131",
+        "packages/topo-core/src/smoothing-gate.ts": "9780bb8c8f5e2a3b22be41dafca3ff7a383f3f870e953e0e176a6195d4dbc8e1",
+        "packages/topo-core/test/postgis.integration.ts": "6c7b4341dd6ddbd3c9acc65afbcc46b9dac90a82dd2cdfbd8b8e7aba6441088c"
+      },
+      "acceptance": "工程用例覆盖单弧段 G1.5，草稿 G2、G4 及证据版本不一致拦截。正式发布门禁、真实 T1 和多弧段组合校验待办。"
+    },
+    {
+      "command": "npm run check && npm run test:postgis --workspace @historical-cartography/topo-core && npm run build --workspace @historical-cartography/carto-studio-web",
+      "date": "2026-11-22",
+      "result": "PASS",
+      "environment": "本地 Windows，Node v24.19.0，PostgreSQL 17.10 与 PostGIS 3.7.0",
+      "source": "后端和 Gemini 分支合并的本地试集成提交",
+      "commit": "3f68d241b1d7cb7dfa0320cbf2371ee0d45bc5ff",
+      "summary": "类型检查、10 项共享和前端测试、18 项数据库集成测试以及 Vite 打包通过。",
+      "acceptance": "编译、数据库和打包联检完成。工作台还以演示场景为主，真实 HTTP 场景与浏览器验收待办。"
     }
   ],
+  "source_review_smoke": {
+    "source_url": "https://persian.packhum.org/text/009801020/3",
+    "source_locator": "Browne 节译第 3 部分，f. 137a",
+    "scholar_evidence_module_sha256": "aba073a48a7463bea2e7ddf31cb338205eb37ab4e66686dcf0ab6cc877a21b30",
+    "index_revision": "10d7d68bb29b2b4e373b81958633917658bcb9b3dedf54b8e96964d9ce9732d6",
+    "result": "原文摘录命中候选；错行拒绝；候选经待审接口提交时拦截，零变更集写入。"
+  },
   "hard_gate_acceptance": {
     "G1": "NOT_RUN",
     "G1.5": "NOT_RUN",
@@ -121,30 +160,30 @@
     {
       "task_id": "C-02",
       "owner": "Codex",
-      "status": "in_progress",
-      "next_action": "在平滑候选上补分形维数、微折角、邻接、地标归属和 G1.5 的完整硬门禁。",
+      "status": "review",
+      "next_action": "在 C-03/C-04 中联调多弧段组合校验，用真实时代资料与地标复验。",
       "acceptance_ids": ["A-11", "A-12"]
     },
     {
       "task_id": "C-03",
       "owner": "Codex",
-      "status": "planned",
-      "next_action": "实现事件绑定的空间变更事务与回滚，并联调后端 AI 2 的真实引文核验接口。",
+      "status": "in_progress",
+      "next_action": "继续实现空间边界编辑与可审阅的差异，接入真实证据和正式提交门禁。变更集草稿、移交及回滚已通过测试。",
       "acceptance_ids": ["A-10", "A-13", "A-14"]
     },
     {
       "task_id": "C-05",
       "owner": "Codex",
-      "status": "planned",
-      "next_action": "与后端 AI 2 共同登记 928 年夹具的拓扑版本、真实史料版本和验收证据。",
+      "status": "in_progress",
+      "next_action": "对齐工作台场景接口，与后端 AI 2 固定可复查的 T1 来源及 928 年相关事件；不同年代解释保持待考证。",
       "acceptance_ids": ["A-40", "A-50"]
     }
   ],
   "next_tasks": [
-    {"task_id": "C-02", "owner": "Codex"},
     {"task_id": "C-03", "owner": "Codex"},
-    {"task_id": "S-01", "owner": "后端 AI 2"},
-    {"task_id": "S-02", "owner": "后端 AI 2"},
-    {"task_id": "F-01", "owner": "Gemini"}
+    {"task_id": "C-04", "owner": "Codex"},
+    {"task_id": "C-05", "owner": "Codex"},
+    {"task_id": "S-04", "owner": "后端 AI 2"},
+    {"task_id": "F-03", "owner": "Gemini"}
   ]
 }

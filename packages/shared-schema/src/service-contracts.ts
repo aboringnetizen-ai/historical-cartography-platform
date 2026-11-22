@@ -119,3 +119,22 @@ export interface MapChangeEvidenceCheck {
   bound_events: BoundEventRevision[];
   issues: readonly GateIssue[];
 }
+
+export interface SubmitMapChangeReviewRequest {
+  changeset_id: string;
+  expected_revision_id: string;
+}
+
+export type SubmitMapChangeReviewResult =
+  | {
+    status: "SUBMITTED_FOR_REVIEW";
+    review_id: string;
+    changeset_id: string;
+    revision_id: string;
+    bound_events: BoundEventRevision[];
+  }
+  | {
+    status: "BLOCKED";
+    reason: "DRAFT_NOT_FOUND" | "DRAFT_CHANGED" | "NO_ACTIVE_OPERATION" | "HUMAN_LOCKED" | "EVIDENCE";
+    issues: readonly GateIssue[];
+  };
