@@ -89,3 +89,33 @@ export type OpenMapChangeSetResult =
     issues: readonly GateIssue[];
   }
   | { status: "REJECTED"; issues: readonly GateIssue[] };
+
+export interface ReassignBaseUnitsRequest {
+  changeset_id: string;
+  operation_id: string;
+  expected_revision_id: string;
+  driven_by_event_ids: readonly string[];
+  assignments: ReadonlyArray<{ face_id: string; polity_id: string | null; control_score: number }>;
+}
+
+export interface DraftUnitOperation {
+  operation_id: string;
+  changeset_id: string;
+  previous_revision_id: string;
+  revision_id: string;
+  moved_face_ids: string[];
+  affected_arc_ids: string[];
+  driven_by_event_ids: string[];
+  status: "APPLIED" | "ROLLED_BACK";
+}
+
+export interface MapChangeDraft {
+  revision_id: string;
+  operations: DraftUnitOperation[];
+}
+
+export interface MapChangeEvidenceCheck {
+  status: "CURRENT" | "BLOCKED";
+  bound_events: BoundEventRevision[];
+  issues: readonly GateIssue[];
+}

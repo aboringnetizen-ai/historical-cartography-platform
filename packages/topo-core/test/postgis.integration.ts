@@ -8,8 +8,8 @@ import { createHistoricalTimestamp } from "@historical-cartography/shared-schema
 import type { EventEvidenceReader, EventEvidenceResult, EvidenceCitation, HistoricalEvent } from "@historical-cartography/shared-schema";
 import {
   checkSharedArcSmoothing, createDraftTopologyRevision, migrateTopology, openMapChangeSet,
-  previewSharedArcSmoothing, readMapSnapshot,
-  registerLandmarkInventory, registerPaleoReference,
+  previewSharedArcSmoothing, readMapChangeDraft, readMapSnapshot, reassignBaseUnits, recheckMapChangeEvidence, registerDraftFaceLock,
+  registerLandmarkInventory, registerPaleoReference, rollbackDraftReassignment,
 } from "../src/index.ts";
 import type {
   ArcSmoothingCheckRequest, ArcSplineRequest, DraftFaceSeed, DraftTopologyInput, PaleoLineReference,
@@ -78,6 +78,7 @@ test("migrations are atomic and repeatable without repeating applied work", asyn
   const first = await readLedger();
   assert.deepEqual(first.rows.map(({ filename }) => filename), [
     "001_topology.sql", "002_paleo_references.sql", "003_smoothing_checks.sql", "004_open_changesets.sql",
+    "005_draft_unit_operations.sql",
   ]);
   await migrateTopology(pool);
   assert.deepEqual((await readLedger()).rows, first.rows);
@@ -534,4 +535,104 @@ test("a verified lower-tier or disputed draft remains pending human review", asy
   assert.equal(result.changeset.status, "PENDING_HUMAN_REVIEW");
   assert.equal(result.changeset.gate_report.g3_provenance_quote_passed, false);
   assert.deepEqual(result.issues.map(({ code }) => code), ["T1_SCHOLARLY_DISPUTE", "PENDING_T1_VERIFICATION"]);
+});
+
+async function openedFixtureDraft(epoch: string, astronomicalYear: number) {
+  const request = await changeSetRequest(epoch, astronomicalYear);
+  const result = await openMapChangeSet(pool, {
+    async verifyEvent({ hist_event_id }) { return verifiedEvent(hist_event_id); },
+  }, request);
+  assert.equal(result.status, "OPENED");
+  return request;
+}
+
+test("unit reassignment preserves the previous geometry, records event impacts and rejects stale updates", async () => {
+  const draft = await openedFixtureDraft("unit-edit", 953);
+  const baseRequest = { revision_id: draft.base_revision_id, historical_jdn: year(953) };
+  const original = await readMapSnapshot(pool, baseRequest);
+  assert.ok(original);
+  const request = {
+    changeset_id: draft.changeset_id, operation_id: randomUUID(), expected_revision_id: draft.base_revision_id,
+    driven_by_event_ids: draft.bound_event_ids, assignments: [{ face_id: "west", polity_id: "transfer-fixture", control_score: 52 }],
+  };
+  const [first, duplicate] = await Promise.all([reassignBaseUnits(pool, request), reassignBaseUnits(pool, request)]);
+  assert.deepEqual(first, duplicate);
+  assert.equal(first.status, "APPLIED");
+  assert.deepEqual(first.moved_face_ids, ["west"]);
+  assert.deepEqual(first.driven_by_event_ids, draft.bound_event_ids);
+  const updated = await readMapSnapshot(pool, { ...baseRequest, revision_id: first.revision_id });
+  assert.ok(updated);
+  assert.equal(updated.data_status, "DRAFT");
+  const west = updated.territories.features.find(({ id }) => id === "west");
+  assert.equal(west?.properties.polity_id, "transfer-fixture");
+  assert.equal(west?.properties.control_score, 52);
+  assert.deepEqual(updated.territories.features.map(({ geometry }) => geometry), original.territories.features.map(({ geometry }) => geometry));
+  assert.ok(first.affected_arc_ids.some((id) => updated.boundaries.features.some(({ properties }) =>
+    properties.arc_id === id && properties.left_face_id !== null && properties.right_face_id !== null,
+  )));
+  assert.deepEqual(await readMapSnapshot(pool, baseRequest), original);
+  assert.deepEqual(await readMapChangeDraft(pool, draft.changeset_id), { revision_id: first.revision_id, operations: [first] });
+  await assert.rejects(reassignBaseUnits(pool, { ...request, operation_id: randomUUID() }), { code: "40001" });
+});
+
+test("foreign events and human-locked units abort the whole reassignment", async () => {
+  const draft = await openedFixtureDraft("unit-lock", 954);
+  const request = {
+    changeset_id: draft.changeset_id, operation_id: randomUUID(), expected_revision_id: draft.base_revision_id,
+    driven_by_event_ids: draft.bound_event_ids,
+    assignments: [
+      { face_id: "west", polity_id: "transfer-fixture", control_score: 20 },
+      { face_id: "east", polity_id: null, control_score: 60 },
+    ],
+  };
+  await assert.rejects(reassignBaseUnits(pool, { ...request, driven_by_event_ids: ["unbound"] }), /bound to the ChangeSet/);
+  await registerDraftFaceLock(pool, draft.base_revision_id, "east");
+  await assert.rejects(reassignBaseUnits(pool, request), { constraint: "draft_face_human_lock", detail: "east" });
+  assert.deepEqual(await readMapChangeDraft(pool, draft.changeset_id), { revision_id: draft.base_revision_id, operations: [] });
+  const revisionCount = await pool.query("SELECT revision_id FROM cartography.topology_revisions WHERE epoch_id = $1", [draft.epoch_id]);
+  assert.equal(revisionCount.rowCount, 1);
+});
+
+test("rolling back draft operations restores each prior revision and retains audit history", async () => {
+  const draft = await openedFixtureDraft("unit-rollback", 955);
+  const request = {
+    changeset_id: draft.changeset_id, operation_id: randomUUID(), expected_revision_id: draft.base_revision_id,
+    driven_by_event_ids: draft.bound_event_ids, assignments: [{ face_id: "west", polity_id: "fixture-first", control_score: 20 }],
+  };
+  const first = await reassignBaseUnits(pool, request);
+  const second = await reassignBaseUnits(pool, {
+    ...request, operation_id: randomUUID(), expected_revision_id: first.revision_id,
+    assignments: [{ face_id: "west", polity_id: "fixture-second", control_score: 80 }],
+  });
+  await assert.rejects(rollbackDraftReassignment(pool, draft.changeset_id, first.operation_id), /active draft operation/);
+  const undoneSecond = await rollbackDraftReassignment(pool, draft.changeset_id, second.operation_id);
+  assert.equal(undoneSecond.status, "ROLLED_BACK");
+  assert.deepEqual(await rollbackDraftReassignment(pool, draft.changeset_id, second.operation_id), undoneSecond);
+  assert.equal((await readMapChangeDraft(pool, draft.changeset_id))?.revision_id, first.revision_id);
+  const undoneFirst = await rollbackDraftReassignment(pool, draft.changeset_id, first.operation_id);
+  assert.equal(undoneFirst.status, "ROLLED_BACK");
+  assert.deepEqual(await readMapChangeDraft(pool, draft.changeset_id), {
+    revision_id: draft.base_revision_id, operations: [undoneFirst, undoneSecond],
+  });
+  assert.deepEqual(await reassignBaseUnits(pool, request), undoneFirst);
+  assert.ok(await readMapSnapshot(pool, { revision_id: second.revision_id, historical_jdn: year(955) }));
+});
+
+test("a fresh evidence check blocks changed index revisions even when the event ID remains the same", async () => {
+  const draft = await openedFixtureDraft("audit-evidence", 956);
+  const reader: EventEvidenceReader = {
+    async verifyEvent({ hist_event_id }) { return verifiedEvent(hist_event_id); },
+  };
+  const current = await recheckMapChangeEvidence(pool, reader, draft.changeset_id);
+  assert.equal(current?.status, "CURRENT");
+  const stale = await recheckMapChangeEvidence(pool, {
+    async verifyEvent({ hist_event_id }) {
+      const response = verifiedEvent(hist_event_id);
+      response.verified_citations[0]!.index_revision = "index-v2";
+      return response;
+    },
+  }, draft.changeset_id);
+  assert.equal(stale?.status, "BLOCKED");
+  assert.match(stale.issues[0]?.message ?? "", /index revision changed/);
+  assert.deepEqual(stale.bound_events, current.bound_events);
 });

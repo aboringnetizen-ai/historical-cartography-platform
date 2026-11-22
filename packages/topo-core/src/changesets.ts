@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import type {
   BoundEventRevision, EventEvidenceReader, EventEvidenceResult, EvidenceCitation, GateIssue,
-  OpenMapChangeSetRequest, OpenMapChangeSetResult,
+  MapChangeEvidenceCheck, OpenMapChangeSetRequest, OpenMapChangeSetResult,
 } from "@historical-cartography/shared-schema";
 
 type Opened = Extract<OpenMapChangeSetResult, { status: "OPENED" }>;
@@ -66,6 +66,44 @@ function pinVerifiedEvent(id: string, { event, event_revision, verified_citation
   return { hist_event_id: id, event_revision, citation_indexes } satisfies BoundEventRevision;
 }
 
+async function resolveEventPins(evidence: EventEvidenceReader, eventIds: readonly string[]) {
+  const resolutions = await Promise.allSettled(eventIds.map(async (id) => evidence.verifyEvent({ hist_event_id: id })));
+  const blockers: GateIssue[] = [];
+  const review: GateIssue[] = [];
+  const pins: BoundEventRevision[] = [];
+  for (const [index, resolution] of resolutions.entries()) {
+    const id = eventIds[index]!;
+    const result = resolution.status === "fulfilled" ? resolution.value : undefined;
+    if (result && result.status === "VERIFIED") {
+      const pin = pinVerifiedEvent(id, result);
+      if (!pin) {
+        blockers.push({
+          gate: "G3", code: "UNVERIFIED_SOURCE", entity_id: id,
+          message: "The event, citation location or pinned evidence revision did not match",
+        });
+        continue;
+      }
+      pins.push(pin);
+      if (result.event.highest_credibility_tier !== "T1_PRIMARY_AND_LOCAL_ACADEMIC"
+          || result.event.conflict_status === "PENDING_T1_VERIFICATION") review.push({
+        gate: "G3", code: "PENDING_T1_VERIFICATION", entity_id: id, message: "The event requires T1 evidence before publication",
+      });
+      if (result.event.conflict_status === "T1_SCHOLARLY_DISPUTE") review.push({
+        gate: "G4", code: "T1_SCHOLARLY_DISPUTE", entity_id: id, message: "The event requires human adjudication",
+      });
+      continue;
+    }
+    if (result && result.hist_event_id === id && Array.isArray(result.issues) && result.issues.length) {
+      blockers.push(...result.issues);
+      continue;
+    }
+    blockers.push({
+      gate: "G3", code: "UNVERIFIED_SOURCE", entity_id: id, message: "The historical event evidence could not be verified",
+    });
+  }
+  return { pins, blockers, review };
+}
+
 export async function openMapChangeSet(
   pool: Pool, evidence: EventEvidenceReader, request: OpenMapChangeSetRequest,
 ): Promise<OpenMapChangeSetResult> {
@@ -106,42 +144,7 @@ export async function openMapChangeSet(
     message: "Base topology revision was not found in the requested epoch",
   }] };
 
-  const resolutions = await Promise.allSettled(normalized.bound_event_ids.map(
-    async (id) => evidence.verifyEvent({ hist_event_id: id }),
-  ));
-  const blockers: GateIssue[] = [];
-  const review: GateIssue[] = [];
-  const pins: BoundEventRevision[] = [];
-  for (const [index, resolution] of resolutions.entries()) {
-    const id = normalized.bound_event_ids[index]!;
-    const result = resolution.status === "fulfilled" ? resolution.value : undefined;
-    if (result && result.status === "VERIFIED") {
-      const pin = pinVerifiedEvent(id, result);
-      if (!pin) {
-        blockers.push({
-          gate: "G3", code: "UNVERIFIED_SOURCE", entity_id: id,
-          message: "The event, citation location or pinned evidence revision did not match",
-        });
-        continue;
-      }
-      pins.push(pin);
-      if (result.event.highest_credibility_tier !== "T1_PRIMARY_AND_LOCAL_ACADEMIC"
-          || result.event.conflict_status === "PENDING_T1_VERIFICATION") review.push({
-        gate: "G3", code: "PENDING_T1_VERIFICATION", entity_id: id, message: "The event requires T1 evidence before publication",
-      });
-      if (result.event.conflict_status === "T1_SCHOLARLY_DISPUTE") review.push({
-        gate: "G4", code: "T1_SCHOLARLY_DISPUTE", entity_id: id, message: "The event requires human adjudication",
-      });
-      continue;
-    }
-    if (result && result.hist_event_id === id && Array.isArray(result.issues) && result.issues.length) {
-      blockers.push(...result.issues);
-      continue;
-    }
-    blockers.push({
-      gate: "G3", code: "UNVERIFIED_SOURCE", entity_id: id, message: "The historical event evidence could not be verified",
-    });
-  }
+  const { pins, blockers, review } = await resolveEventPins(evidence, normalized.bound_event_ids);
   if (blockers.length) return { status: "REJECTED", issues: blockers };
 
   const opened = await pool.query<{ result: Opened }>(
@@ -152,4 +155,43 @@ export async function openMapChangeSet(
   const result = opened.rows[0]?.result;
   if (!result) throw new Error("Could not open the draft ChangeSet");
   return result;
+}
+
+export async function recheckMapChangeEvidence(
+  pool: Pool, evidence: EventEvidenceReader, changeSetId: string,
+): Promise<MapChangeEvidenceCheck | null> {
+  const { rows } = await pool.query<{ bound_events: BoundEventRevision[] }>(`
+    SELECT coalesce((
+      SELECT jsonb_agg(jsonb_build_object(
+        'hist_event_id', b.hist_event_id, 'event_revision', b.event_revision, 'citation_indexes', b.citation_indexes
+      ) ORDER BY b.hist_event_id)
+      FROM cartography.changeset_event_bindings AS b WHERE b.changeset_id = cs.changeset_id
+    ), '[]'::jsonb) AS bound_events
+    FROM cartography.spatial_changesets AS cs WHERE cs.changeset_id = $1
+  `, [changeSetId]);
+  const row = rows[0];
+  if (!row) return null;
+  if (!row.bound_events.length) return {
+    status: "BLOCKED", bound_events: [], issues: [{ gate: "G2", code: "EVENT_REQUIRED", message: "No event binding found" }],
+  };
+
+  const { pins, blockers, review } = await resolveEventPins(evidence, row.bound_events.map((item) => item.hist_event_id));
+  const issues = [...blockers, ...review];
+  const freshByEvent = new Map(pins.map((pin) => [pin.hist_event_id, pin]));
+  for (const recorded of row.bound_events) {
+    const fresh = freshByEvent.get(recorded.hist_event_id);
+    if (!fresh) continue;
+    const proofs = new Map(fresh.citation_indexes.map((proof) => [proof.citation_id, proof]));
+    if (fresh.event_revision !== recorded.event_revision || proofs.size !== recorded.citation_indexes.length
+        || recorded.citation_indexes.some((proof) => {
+          const actual = proofs.get(proof.citation_id);
+          return actual?.index_revision !== proof.index_revision || actual.source_doc_id !== proof.source_doc_id;
+        })) {
+      issues.push({
+        gate: "G3", code: "UNVERIFIED_SOURCE", entity_id: recorded.hist_event_id,
+        message: "The authoritative event or citation index revision changed after the draft was opened",
+      });
+    }
+  }
+  return { status: issues.length ? "BLOCKED" : "CURRENT", bound_events: row.bound_events, issues };
 }

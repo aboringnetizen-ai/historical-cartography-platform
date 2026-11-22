@@ -7,6 +7,7 @@ const migrations = [
   new URL("../migrations/002_paleo_references.sql", import.meta.url),
   new URL("../migrations/003_smoothing_checks.sql", import.meta.url),
   new URL("../migrations/004_open_changesets.sql", import.meta.url),
+  new URL("../migrations/005_draft_unit_operations.sql", import.meta.url),
 ];
 
 export async function migrateTopology(pool: Pool): Promise<void> {

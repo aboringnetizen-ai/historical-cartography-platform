@@ -13,7 +13,8 @@ import { checkSplineCandidate } from "./smoothing-gate.ts";
 import type { ArcSmoothingCheck, ArcSmoothingCheckRequest } from "./smoothing-gate.ts";
 
 export { migrateTopology } from "./migrate.ts";
-export { openMapChangeSet } from "./changesets.ts";
+export { openMapChangeSet, recheckMapChangeEvidence } from "./changesets.ts";
+export { readMapChangeDraft, reassignBaseUnits, registerDraftFaceLock, rollbackDraftReassignment } from "./draft-units.ts";
 export type { ArcSplinePreview, ArcSplineRequest } from "./spline-preview.ts";
 export { registerLandmarkInventory } from "./smoothing-gate.ts";
 export type { ArcSmoothingCheck, ArcSmoothingCheckRequest, LandmarkAnchor } from "./smoothing-gate.ts";
