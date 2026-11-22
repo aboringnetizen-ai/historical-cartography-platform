@@ -270,13 +270,30 @@ export function solvePolityPalette(params: {
 
   const theme = PALETTE_THEMES[params.palette_id] ?? PALETTE_THEMES["palette-vivid-narrative"]!;
   const themeColors = theme.colors;
+
+  const lineageDepth = (id: string): number => {
+    let d = 0;
+    let cur = polityMap.get(id)?.parent_polity_id;
+    const seen = new Set<string>([id]);
+    while (cur && !seen.has(cur) && d < 16) {
+      seen.add(cur);
+      d += 1;
+      cur = polityMap.get(cur)?.parent_polity_id;
+    }
+    return d;
+  };
+
+  // Parent-before-child topological order, then highest adjacency degree first
   const polityIds = Array.from(adjacency.keys()).sort((a, b) => {
+    const depthDiff = lineageDepth(a) - lineageDepth(b);
+    if (depthDiff !== 0) return depthDiff;
     const degDiff = (adjacency.get(b)?.size ?? 0) - (adjacency.get(a)?.size ?? 0);
     return degDiff !== 0 ? degDiff : a.localeCompare(b);
   });
 
   const colorsByPolity: Record<string, string> = {};
   const inheritedPolities: string[] = [];
+  const childVariantCounter = new Map<string, number>();
 
   for (let i = 0; i < polityIds.length; i++) {
     const polityId = polityIds[i]!;
@@ -291,15 +308,28 @@ export function solvePolityPalette(params: {
     const parentColor = parentId ? colorsByPolity[parentId] : undefined;
 
     if (!params.auto_four_color_solver) {
-      colorsByPolity[polityId] = meta?.preferred_hex ?? themeColors[i % themeColors.length]!;
+      if (parentColor && parentId) {
+        inheritedPolities.push(polityId);
+        const variantIdx = (childVariantCounter.get(parentId) ?? 0) + 1;
+        childVariantCounter.set(parentId, variantIdx);
+        colorsByPolity[polityId] = deriveInheritedPolityColor(parentColor, variantIdx);
+      } else {
+        colorsByPolity[polityId] = meta?.preferred_hex ?? themeColors[i % themeColors.length]!;
+      }
       continue;
     }
 
     const neighbors = Array.from(adjacency.get(polityId) ?? []);
     const candidates: string[] = [];
-    if (parentColor) {
+    if (parentColor && parentId) {
       inheritedPolities.push(polityId);
-      candidates.push(deriveInheritedPolityColor(parentColor, 1), deriveInheritedPolityColor(parentColor, 2));
+      const baseIdx = (childVariantCounter.get(parentId) ?? 0) + 1;
+      childVariantCounter.set(parentId, baseIdx);
+      candidates.push(
+        deriveInheritedPolityColor(parentColor, baseIdx),
+        deriveInheritedPolityColor(parentColor, baseIdx + 1),
+        deriveInheritedPolityColor(parentColor, baseIdx + 2),
+      );
     }
     if (meta?.preferred_hex) {
       candidates.push(meta.preferred_hex);
@@ -382,18 +412,29 @@ export function evaluateControlScoreVisuals(
   territoryRendering: ComposableStylePack["territory_rendering"],
   baseMode: "PURE_TERRITORY" | "CONTROL_INTENSITY",
   renderMode: "OPACITY_GRADIENT" | "COLOR_RAMP" | "CLOSED_ISOPLETH_CONTOURS" = "OPACITY_GRADIENT",
+  adjustments?: { opacity_multiplier?: number; saturation_multiplier?: number },
 ): { fill_hex: string; fill_opacity: number; contour_dasharray?: number[] } {
+  const opMult = adjustments?.opacity_multiplier ?? 1.0;
+  const satMult = adjustments?.saturation_multiplier ?? 1.0;
+  const scaleOpacity = (raw: number): number =>
+    Number(Math.max(0.04, Math.min(0.98, raw * opMult)).toFixed(3));
+  const scaleHex = (rawHex: string): string => {
+    if (Math.abs(satMult - 1) < 0.01) return rawHex;
+    const [h, s, l] = hexToHsl(rawHex);
+    return hslToHex(h, Math.max(0, Math.min(100, s * satMult)), l);
+  };
+
   if (baseMode === "PURE_TERRITORY") {
     return {
-      fill_hex: baseHex,
-      fill_opacity: territoryRendering.pure_mode_fill_opacity,
+      fill_hex: scaleHex(baseHex),
+      fill_opacity: scaleOpacity(territoryRendering.pure_mode_fill_opacity),
     };
   }
 
   const clamped = Math.max(0, Math.min(100, controlScore));
   const stops = [...territoryRendering.control_score_stops].sort((a, b) => a.score - b.score);
   if (stops.length === 0) {
-    return { fill_hex: baseHex, fill_opacity: (clamped / 100) * 0.85 + 0.08 };
+    return { fill_hex: scaleHex(baseHex), fill_opacity: scaleOpacity((clamped / 100) * 0.85 + 0.08) };
   }
 
   let lower = stops[0]!;
@@ -411,17 +452,17 @@ export function evaluateControlScoreVisuals(
   const span = Math.max(1e-6, upper.score - lower.score);
   const t = upper.score === lower.score ? 0 : Math.max(0, Math.min(1, (clamped - lower.score) / span));
   const opacity = lower.opacity + (upper.opacity - lower.opacity) * t;
-  const satScale = lower.saturation_scale + (upper.saturation_scale - lower.saturation_scale) * t;
+  const satScale = (lower.saturation_scale + (upper.saturation_scale - lower.saturation_scale) * t) * satMult;
 
   const [h, s, l] = hexToHsl(baseHex);
   const adjustedHex = renderMode === "COLOR_RAMP"
-    ? hslToHex(h, s * satScale, Math.min(82, l + (1 - clamped / 100) * 26))
-    : hslToHex(h, s * satScale, l);
+    ? hslToHex(h, Math.max(0, Math.min(100, s * satScale)), Math.min(82, l + (1 - clamped / 100) * 26))
+    : hslToHex(h, Math.max(0, Math.min(100, s * satScale)), l);
 
   const dash = lower.contour_stroke_dasharray;
   return {
     fill_hex: adjustedHex,
-    fill_opacity: Number(opacity.toFixed(3)),
+    fill_opacity: scaleOpacity(opacity),
     ...(dash ? { contour_dasharray: dash } : {}),
   };
 }

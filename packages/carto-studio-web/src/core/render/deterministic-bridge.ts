@@ -8,6 +8,8 @@ export interface FrameReadinessSignals {
   shaders_ready: boolean;
   tiles_loaded: boolean;
   revision_id: string;
+  style_version?: string;
+  resource_version?: string;
   frame_index: number;
   time_ms: number;
 }
@@ -28,23 +30,28 @@ export interface StepFrameResult {
   g5_gate: GateResult;
 }
 
-export type StepFrameHandler = (timeMs: number) => Promise<void> | void;
+export type StepFrameHandler = (timeMs: number, frameIndex: number) => Promise<void> | void;
 
 export class DeterministicFrameBridge {
   private frameCounter = 0;
   private currentTimeMs = 0;
   private revisionId = "rev-init";
-  private mapIdle = true;
-  private fontsLoaded = true;
-  private shadersReady = true;
-  private tilesLoaded = true;
+  private styleVersion = "style-init";
+  private resourceVersion = "res-v4";
+  // Must default to false until mounted WebGL/map/fonts/tiles explicitly report ready
+  private mapIdle = false;
+  private fontsLoaded = false;
+  private shadersReady = false;
+  private tilesLoaded = false;
   private faultFlags: DeterministicFaultFlags = {};
   private onStepHandler: StepFrameHandler | undefined;
   private labelReportProvider: (() => LabelLayoutReport) | undefined;
   private hudLayoutProvider: (() => AspectSafeAreaLayout) | undefined;
 
-  setRevision(revisionId: string): void {
+  setRevision(revisionId: string, styleVersion?: string, resourceVersion?: string): void {
     this.revisionId = revisionId;
+    if (styleVersion !== undefined) this.styleVersion = styleVersion;
+    if (resourceVersion !== undefined) this.resourceVersion = resourceVersion;
   }
 
   setSignals(partial: Partial<Omit<FrameReadinessSignals, "frame_index" | "time_ms">>): void {
@@ -53,6 +60,8 @@ export class DeterministicFrameBridge {
     if (partial.shaders_ready !== undefined) this.shadersReady = partial.shaders_ready;
     if (partial.tiles_loaded !== undefined) this.tilesLoaded = partial.tiles_loaded;
     if (partial.revision_id !== undefined) this.revisionId = partial.revision_id;
+    if (partial.style_version !== undefined) this.styleVersion = partial.style_version;
+    if (partial.resource_version !== undefined) this.resourceVersion = partial.resource_version;
   }
 
   setFaultFlags(flags: DeterministicFaultFlags): void {
@@ -76,6 +85,8 @@ export class DeterministicFrameBridge {
       shaders_ready: this.faultFlags.force_shaders_not_ready ? false : this.shadersReady,
       tiles_loaded: this.faultFlags.force_tiles_incomplete ? false : this.tilesLoaded,
       revision_id: this.revisionId,
+      style_version: this.styleVersion,
+      resource_version: this.resourceVersion,
       frame_index: this.frameCounter,
       time_ms: this.currentTimeMs,
     };
@@ -141,20 +152,22 @@ export class DeterministicFrameBridge {
       throw new RangeError(`timeMs must be finite and >= 0, got ${timeMs}`);
     }
     this.frameCounter += 1;
+    const reqFrame = this.frameCounter;
     this.currentTimeMs = timeMs;
 
     if (this.onStepHandler) {
-      await this.onStepHandler(timeMs);
+      await this.onStepHandler(timeMs, reqFrame);
     }
-    const g = globalThis as { document?: { fonts?: { ready?: Promise<unknown> } } };
+    const g = globalThis as { document?: { fonts?: { status?: string; ready?: Promise<unknown> } } };
     if (g.document?.fonts?.ready) {
       await g.document.fonts.ready;
+      this.fontsLoaded = g.document.fonts.status ? g.document.fonts.status === "loaded" : true;
     }
 
     const signals = this.snapshotSignals();
     const g5Gate = this.evaluateG5Gate(signals);
     return {
-      accepted: g5Gate.passed,
+      accepted: g5Gate.passed && signals.frame_index === reqFrame,
       frame_index: signals.frame_index,
       time_ms: signals.time_ms,
       revision_id: signals.revision_id,

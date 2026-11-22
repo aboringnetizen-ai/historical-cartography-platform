@@ -1,57 +1,122 @@
 {
-  "license": "Natural Earth Public Domain (https://www.naturalearthdata.com/about/terms-of-use/)",
-  "generated_at_iso": "2026-11-22T07:17:15.821Z",
+  "license": "Natural Earth Public Domain + PRC Standard Boundary GeoJSON (adcode 100000) + aourednik/historical-basemaps",
+  "generated_at_iso": "2026-11-22T10:09:23.840Z",
   "sources": [
     {
-      "file": "ne_50m_ocean.geojson",
-      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_ocean.geojson",
-      "sha256": "5b810162af4b20805838cfd766ef1a445c350cf6aafc8b589515daef30033adf"
+      "file": "ne_10m_ocean.geojson",
+      "local_path": "data/raw-gis/ne_10m_ocean.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_ocean.geojson",
+      "sha256": "f9696a1337c746a0f6c8c13bc60d0f230d2ef8d105198d5657726c8f8e763fc2"
     },
     {
       "file": "ne_10m_lakes.geojson",
+      "local_path": "data/raw-gis/ne_10m_lakes.geojson",
       "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_lakes.geojson",
       "sha256": "2d036f53dedec578001c5c30c2959ee7d4eebc1306900fa4367c49929ec8f2d9"
     },
     {
       "file": "ne_10m_lakes_historic.geojson",
+      "local_path": "data/raw-gis/ne_10m_lakes_historic.geojson",
       "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_lakes_historic.geojson",
       "sha256": "43913ce0f5c18fe4d551d628b836af0da59ba193631767b5012a7f97b6a5b615"
     },
     {
+      "file": "ne_10m_lakes_europe.geojson",
+      "local_path": "data/raw-gis/ne_10m_lakes_europe.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_lakes_europe.geojson",
+      "sha256": "b4dd9e7a5edd0d07b54768b5404d1ebe77f80b9d579c85fff65f90cf50369769"
+    },
+    {
       "file": "ne_10m_rivers_lake_centerlines.geojson",
+      "local_path": "data/raw-gis/ne_10m_rivers_lake_centerlines.geojson",
       "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_rivers_lake_centerlines.geojson",
       "sha256": "bb854a900ecbd3b408df46d5e16e3e0f974ba55993f9d8b5c26e855273c0905a"
     },
     {
-      "file": "ne_50m_admin_0_boundary_lines_land.geojson",
-      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_boundary_lines_land.geojson",
-      "sha256": "2faac4f6b34386f3d21b6e018cf151f241f00e5c936d44dd17d7d9bfb147fa48"
+      "file": "ne_10m_rivers_europe.geojson",
+      "local_path": "data/raw-gis/ne_10m_rivers_europe.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_rivers_europe.geojson",
+      "sha256": "90712202ac46985812e90840df9acd5101599a9c649868d5bc55ee96c2fedd4c"
+    },
+    {
+      "file": "ne_10m_admin_0_boundary_lines_land.geojson",
+      "local_path": "data/raw-gis/ne_10m_admin_0_boundary_lines_land.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_boundary_lines_land.geojson",
+      "sha256": "74d9c16229c095fde65943a9919e337682f044bcebccb120764f38edf3b70f4a"
+    },
+    {
+      "file": "ne_10m_admin_1_states_provinces.geojson",
+      "local_path": "data/raw-gis/ne_10m_admin_1_states_provinces.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces.geojson",
+      "sha256": "22d0e3ad85eb3e27f17cabf8ba2d50e554fbc27a87796ff891d958185da62fb5"
+    },
+    {
+      "file": "world_bc1.geojson",
+      "local_path": "data/raw-gis/historical-basemaps/world_bc1.geojson",
+      "url": "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_bc1.geojson",
+      "sha256": "830fac0104ebafff7b576333cd5ab4a9bf4b6f732ddf828cec47797cf65047cb"
+    },
+    {
+      "file": "world_800.geojson",
+      "local_path": "data/raw-gis/historical-basemaps/world_800.geojson",
+      "url": "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_800.geojson",
+      "sha256": "9d046cdc4662109c3f803ae46e2c8cba941aa092ec86eccc7823e6cf1554920c"
+    },
+    {
+      "file": "world_900.geojson",
+      "local_path": "data/raw-gis/historical-basemaps/world_900.geojson",
+      "url": "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_900.geojson",
+      "sha256": "f483b93e799d6518830ed6da6c3772c49170872d0f07515981a53e71d8dbc74c"
+    },
+    {
+      "file": "world_1300.geojson",
+      "local_path": "data/raw-gis/historical-basemaps/world_1300.geojson",
+      "url": "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_1300.geojson",
+      "sha256": "a27985e60d936611d7933f0c30f1b52c36ef4a17225dfac25fb96abe40fa496f"
+    },
+    {
+      "file": "world_1650.geojson",
+      "local_path": "data/raw-gis/historical-basemaps/world_1650.geojson",
+      "url": "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_1650.geojson",
+      "sha256": "e691a3b5bab4ca7a0629daffaf8cd31731ee76ad390b19dffc1c267b139de4e2"
+    },
+    {
+      "file": "world_1815.geojson",
+      "local_path": "data/raw-gis/historical-basemaps/world_1815.geojson",
+      "url": "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson/world_1815.geojson",
+      "sha256": "fb654f734583f550904cfa45f361e395c1a488c4960050da2632cb2ac7d1cd1e"
+    },
+    {
+      "file": "china_standard_100000.json",
+      "local_path": "data/raw-gis/china_standard_100000.json",
+      "url": "https://geo.datav.aliyun.com/areas_v3/bound/100000.json",
+      "sha256": "83ac502aeac66a5527607ec844169418505d990f1a2dc33226743643541eed3c"
     }
   ],
   "outputs": [
     {
       "file": "ocean.geojson",
       "feature_count": 1,
-      "bytes": 1021543,
-      "sha256": "4d472cf56086331889f95d2b99f4b7f0a72b392273ab6845a25ae67f904f10bf"
+      "bytes": 7473948,
+      "sha256": "d4e6e0f0f19592202768d2e46a4979f0fb8b9fef75f7a9f156d6619478f707dc"
     },
     {
       "file": "lakes.geojson",
-      "feature_count": 177,
-      "bytes": 537963,
-      "sha256": "67bf7c09d44fb2f55ba2429eb6920a5409b418d2cb3ede6cf4cadda99a1ac2f1"
+      "feature_count": 179,
+      "bytes": 545362,
+      "sha256": "f17a1011c54ea47423f5e2b5339e05655eb74ed02ce433f0dd4476ae4a835444"
     },
     {
       "file": "rivers.geojson",
-      "feature_count": 551,
-      "bytes": 1971727,
-      "sha256": "0871118fab87ff0d86160ebc7c3cfe3952f865758ba8621986a78826d29f27d1"
+      "feature_count": 558,
+      "bytes": 1994991,
+      "sha256": "d6de9478b920590f3388e1875db4888179730f71618184781352f3c1743fee20"
     },
     {
       "file": "modern_borders.geojson",
-      "feature_count": 390,
-      "bytes": 362986,
-      "sha256": "7a72bf3839b2995a5fe200ce61cf3ef379ec1e5ec8e7e841a94293d8de434f93"
+      "feature_count": 587,
+      "bytes": 949625,
+      "sha256": "df7e4062df1c0e8a1eebcd1546783c2fd2afa74a058e6831d794944fc7ab9cc9"
     }
   ]
 }

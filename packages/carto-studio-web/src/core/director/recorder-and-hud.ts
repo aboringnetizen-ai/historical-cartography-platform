@@ -3,13 +3,22 @@ import type {
   GateIssue,
   GateResult,
   HistoricalEvent,
+  HistoricalToponym,
   LayerVisibilityConfig,
   MapSnapshot,
   VideoExportJobSpec,
 } from "@historical-cartography/shared-schema";
-import { JDN_842, JDN_928_JAN, JDN_928_NOV } from "../data/demo-sources-events.ts";
+import type { EpochSceneBundle } from "../data/demo-types.ts";
+import { JDN_960, JDN_975 } from "../data/demo-sources-events.ts";
 import type { ScreenBox } from "../layout/label-collision.ts";
-import { boxesIntersect } from "../layout/label-collision.ts";
+import { boxesIntersect, computePolylabel } from "../layout/label-collision.ts";
+
+export {
+  classifyTopologyTransition,
+  interpolateMorphSnapshot,
+  resampleLineString,
+  type TopologyTransitionPlan,
+} from "./morph-engine.ts";
 
 export interface TelemetrySample {
   elapsed_ms: number;
@@ -42,34 +51,54 @@ export interface AspectSafeAreaLayout {
   g5_hud_gate: GateResult;
 }
 
-export interface TopologyTransitionPlan {
-  is_homeomorphic: boolean;
-  mode: "STREAMLINE_ARC_MORPH" | NonNullable<DirectorKeyframe["topology_change_fallback"]>;
-  shared_arc_ids: string[];
-  added_or_removed_arcs: string[];
-  reason_zh: string;
-}
-
 export function getResolutionDimensions(
   aspectRatio: VideoExportJobSpec["aspect_ratio"],
   resolution: VideoExportJobSpec["resolution"] = "1080p",
 ): { width: number; height: number } {
   const shortSide = resolution === "4K" ? 2160 : resolution === "1440p" ? 1440 : 1080;
   switch (aspectRatio) {
-    case "16:9":
-      return { width: Math.round((shortSide * 16) / 9), height: shortSide };
-    case "9:16":
-      return { width: shortSide, height: Math.round((shortSide * 16) / 9) };
-    case "1:1":
-      return { width: shortSide, height: shortSide };
-    case "21:9":
-      return { width: Math.round((shortSide * 21) / 9), height: shortSide };
+    case "16:9": return { width: Math.round((shortSide * 16) / 9), height: shortSide };
+    case "9:16": return { width: shortSide, height: Math.round((shortSide * 16) / 9) };
+    case "1:1": return { width: shortSide, height: shortSide };
+    case "21:9": return { width: Math.round((shortSide * 21) / 9), height: shortSide };
   }
 }
 
+export function extractHudWindowsFromTelemetry(
+  samples: readonly TelemetrySample[],
+  baseWidgets: readonly HudWidgetSpec[],
+): HudWidgetSpec[] {
+  if (samples.length === 0) return [...baseWidgets];
+  const minT = samples[0]!.elapsed_ms / 1000;
+  const maxT = Math.max(minT + 0.5, samples[samples.length - 1]!.elapsed_ms / 1000);
+  const firstActive = new Map<string, number>();
+  const lastActive = new Map<string, number>();
+
+  for (const s of samples) {
+    const t = Number((s.elapsed_ms / 1000).toFixed(3));
+    for (const key of s.active_hud_ids) {
+      if (!firstActive.has(key)) firstActive.set(key, t);
+      lastActive.set(key, t);
+    }
+  }
+
+  return baseWidgets.map((w) => {
+    const fromT = firstActive.get(w.type) ?? firstActive.get(w.widget_id);
+    const toT = lastActive.get(w.type) ?? lastActive.get(w.widget_id);
+    if (fromT === undefined || toT === undefined) {
+      return { ...w, visible_from_sec: 0, visible_to_sec: 0 };
+    }
+    return {
+      ...w,
+      visible_from_sec: fromT,
+      visible_to_sec: Math.max(fromT + 0.4, toT === minT ? maxT : toT),
+    };
+  });
+}
+
 /**
- * Filter 60Hz raw telemetry into smooth editable DirectorKeyframe[].
- * Preserves endpoints, camera extrema, and any JDN / style / layer switches.
+ * Filter 60Hz raw telemetry into smoothed editable DirectorKeyframe[].
+ * Smooths lon, lat, zoom, bearing_deg, and pitch_deg, preserving HUD/style/layer transitions.
  */
 export function importRecordingTelemetry(
   samples: readonly TelemetrySample[],
@@ -94,41 +123,42 @@ export function importRecordingTelemetry(
     ];
   }
 
-  // Pass 1: Bezier moving average smoothing across neighboring camera samples
   const smoothed = samples.map((cur, idx) => {
     const prev = samples[Math.max(0, idx - 1)]!;
     const next = samples[Math.min(samples.length - 1, idx + 1)]!;
-    const cLon = 0.25 * prev.camera.center[0] + 0.5 * cur.camera.center[0] + 0.25 * next.camera.center[0];
-    const cLat = 0.25 * prev.camera.center[1] + 0.5 * cur.camera.center[1] + 0.25 * next.camera.center[1];
-    const zoom = 0.25 * prev.camera.zoom + 0.5 * cur.camera.zoom + 0.25 * next.camera.zoom;
+    const blend = (a: number, b: number, c: number): number => 0.25 * a + 0.5 * b + 0.25 * c;
     return {
       ...cur,
       camera: {
-        center: [Number(cLon.toFixed(4)), Number(cLat.toFixed(4))] as [number, number],
-        zoom: Number(zoom.toFixed(3)),
-        bearing_deg: cur.camera.bearing_deg,
-        pitch_deg: cur.camera.pitch_deg,
+        center: [
+          Number(blend(prev.camera.center[0], cur.camera.center[0], next.camera.center[0]).toFixed(4)),
+          Number(blend(prev.camera.center[1], cur.camera.center[1], next.camera.center[1]).toFixed(4)),
+        ] as [number, number],
+        zoom: Number(blend(prev.camera.zoom, cur.camera.zoom, next.camera.zoom).toFixed(3)),
+        bearing_deg: Number(blend(prev.camera.bearing_deg, cur.camera.bearing_deg, next.camera.bearing_deg).toFixed(1)),
+        pitch_deg: Number(blend(prev.camera.pitch_deg, cur.camera.pitch_deg, next.camera.pitch_deg).toFixed(1)),
       },
     };
   });
 
-  // Pass 2: Keyframe thinning while always keeping discrete style/layer/JDN jumps
   const kept: TelemetrySample[] = [smoothed[0]!];
   for (let i = 1; i < smoothed.length - 1; i++) {
     const prevKept = kept[kept.length - 1]!;
     const cur = smoothed[i]!;
     const dtSec = (cur.elapsed_ms - prevKept.elapsed_ms) / 1000;
-    const dPos = Math.hypot(
-      cur.camera.center[0] - prevKept.camera.center[0],
-      cur.camera.center[1] - prevKept.camera.center[1],
-    );
+    const dPos = Math.hypot(cur.camera.center[0] - prevKept.camera.center[0], cur.camera.center[1] - prevKept.camera.center[1]);
     const dZoom = Math.abs(cur.camera.zoom - prevKept.camera.zoom);
+    const dRot = Math.abs(cur.camera.bearing_deg - prevKept.camera.bearing_deg)
+      + Math.abs(cur.camera.pitch_deg - prevKept.camera.pitch_deg);
+    const hudChanged = cur.active_hud_ids.join("|") !== prevKept.active_hud_ids.join("|");
     const stateChanged =
       cur.style_id !== prevKept.style_id
       || cur.layer_config.base_mode !== prevKept.layer_config.base_mode
-      || Math.abs(cur.historical_jdn - prevKept.historical_jdn) > 0.5;
+      || cur.layer_config.enabled_overlays.join(",") !== prevKept.layer_config.enabled_overlays.join(",")
+      || Math.abs(cur.historical_jdn - prevKept.historical_jdn) > 0.5
+      || hudChanged;
 
-    if (stateChanged || dtSec >= 0.8 || dPos >= toleranceDeg || dZoom >= 0.25) {
+    if (stateChanged || dtSec >= 0.8 || dPos >= toleranceDeg || dZoom >= 0.25 || dRot >= 3.0) {
       kept.push(cur);
     }
   }
@@ -151,30 +181,81 @@ export function importRecordingTelemetry(
   }));
 }
 
+function computeEventAutoFrame(
+  ev: HistoricalEvent,
+  bundle?: {
+    toponyms?: readonly HistoricalToponym[];
+    snapshot?: MapSnapshot;
+    default_camera?: { center: [number, number]; zoom: number };
+  },
+): { center: [number, number]; zoom: number } {
+  const pts: Array<[number, number]> = [];
+  if (bundle?.toponyms) {
+    const tSet = new Set(ev.involved_toponym_ids);
+    for (const top of bundle.toponyms) {
+      if (tSet.has(top.toponym_id)) pts.push(top.coordinates);
+    }
+  }
+  if (bundle?.snapshot && pts.length < 2) {
+    const pSet = new Set(ev.involved_polity_ids);
+    for (const face of bundle.snapshot.territories.features) {
+      if (face.properties.polity_id && pSet.has(face.properties.polity_id)) {
+        for (const p of face.geometry.coordinates[0] ?? []) {
+          pts.push([p[0] ?? 0, p[1] ?? 0]);
+        }
+      }
+    }
+  }
+  if (pts.length === 0) {
+    return bundle?.default_camera ?? { center: [62.2, 38.0], zoom: 4.5 };
+  }
+  let minLon = Infinity;
+  let maxLon = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  for (const [lon, lat] of pts) {
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  const spanLon = Math.max(1.8, maxLon - minLon);
+  const spanLat = Math.max(1.2, maxLat - minLat);
+  const zoom = Math.max(2.6, Math.min(6.4, Math.log2(160 / Math.max(spanLon, spanLat * 1.45))));
+  return {
+    center: [Number(((minLon + maxLon) / 2).toFixed(2)), Number(((minLat + maxLat) / 2).toFixed(2))],
+    zoom: Number(zoom.toFixed(2)),
+  };
+}
+
 /**
  * Generate an auto-framed storyboard (`DirectorKeyframe[]` + 7 HUD widgets)
- * from selected timeline events or narration script lines (`generate_video_storyboard`).
+ * strictly from event entities, toponym bounds, and script lines.
  */
 export function generateVideoStoryboard(params: {
   events: readonly HistoricalEvent[];
   script_lines?: readonly string[];
   style_id?: string;
   aspect_ratio?: VideoExportJobSpec["aspect_ratio"];
+  bundle?: EpochSceneBundle;
 }): { keyframes: DirectorKeyframe[]; hud_widgets: HudWidgetSpec[]; duration_sec: number } {
   const orderedEvents = [...params.events].sort(
     (a, b) => a.time_start.julian_day_number - b.time_start.julian_day_number,
   );
-  const styleId = params.style_id ?? "vivid_video_songti";
+  const styleId = params.style_id ?? params.bundle?.recommended_style_id ?? "vivid_video_songti";
   const keyframes: DirectorKeyframe[] = [];
   const hudWidgets: HudWidgetSpec[] = [];
 
   if (orderedEvents.length === 0) {
+    const cam = params.bundle?.default_camera ?? { center: [67.5, 37.5] as [number, number], zoom: 4.1 };
+    const startJdn = params.bundle?.epoch.valid_from_jdn ?? JDN_960;
+    const endJdn = params.bundle ? params.bundle.epoch.valid_to_jdn - 1 : JDN_975;
     keyframes.push(
       {
         keyframe_id: "kf-auto-001",
         video_time_sec: 0,
-        historical_jdn: JDN_842,
-        camera: { center: [63.5, 38.2], zoom: 4.5, bearing_deg: 0, pitch_deg: 0 },
+        historical_jdn: startJdn,
+        camera: { center: cam.center, zoom: cam.zoom, bearing_deg: 0, pitch_deg: 0 },
         easing: "EASE_IN_OUT_CUBIC",
         style_id: styleId,
         enable_ghost_previous_border: true,
@@ -184,8 +265,8 @@ export function generateVideoStoryboard(params: {
       {
         keyframe_id: "kf-auto-002",
         video_time_sec: 3,
-        historical_jdn: JDN_928_NOV,
-        camera: { center: [58.0, 36.8], zoom: 5.1, bearing_deg: -6, pitch_deg: 18 },
+        historical_jdn: endJdn,
+        camera: { center: [cam.center[0] - 1.5, cam.center[1]], zoom: cam.zoom + 0.4, bearing_deg: -5, pitch_deg: 16 },
         easing: "CAMERA_FLY_TO",
         style_id: styleId,
         enable_ghost_previous_border: true,
@@ -195,7 +276,7 @@ export function generateVideoStoryboard(params: {
     );
     return {
       keyframes,
-      hud_widgets: buildDefaultHudWidgets(3, params.script_lines),
+      hud_widgets: buildDefaultHudWidgets(3, params.script_lines, params.bundle),
       duration_sec: 3,
     };
   }
@@ -203,20 +284,17 @@ export function generateVideoStoryboard(params: {
   let timeCursor = 0;
   for (let i = 0; i < orderedEvents.length; i++) {
     const ev = orderedEvents[i]!;
-    const isRayy = ev.hist_event_id.includes("928");
-    const isHan = ev.hist_event_id.includes("1bce");
-    const center: [number, number] = isHan
-      ? [84.2, 41.2]
-      : isRayy
-        ? [56.2, 36.6]
-        : [64.4, 39.2];
-    const zoom = isRayy ? 5.2 : 4.6;
-
+    const frame = computeEventAutoFrame(ev, params.bundle);
     keyframes.push({
       keyframe_id: `kf-ev-${String(i + 1).padStart(3, "0")}`,
       video_time_sec: timeCursor,
       historical_jdn: ev.time_start.julian_day_number,
-      camera: { center, zoom, bearing_deg: i % 2 === 0 ? 0 : -5, pitch_deg: i % 2 === 0 ? 8 : 20 },
+      camera: {
+        center: frame.center,
+        zoom: frame.zoom,
+        bearing_deg: i % 2 === 0 ? 0 : -5,
+        pitch_deg: i % 2 === 0 ? 6 : 18,
+      },
       easing: i === 0 ? "LINEAR" : "CAMERA_FLY_TO",
       style_id: styleId,
       layer_config: {
@@ -225,7 +303,7 @@ export function generateVideoStoryboard(params: {
       },
       enable_ghost_previous_border: true,
       morph_transition_sec: 1.1,
-      topology_change_fallback: "OCCUPATION_RIPPLE",
+      topology_change_fallback: ev.conflict_status === "T1_SCHOLARLY_DISPUTE" ? "WIPE_MASK" : "OCCUPATION_RIPPLE",
     });
 
     const segEnd = timeCursor + 3.0;
@@ -241,7 +319,7 @@ export function generateVideoStoryboard(params: {
     timeCursor = segEnd;
   }
 
-  const baseWidgets = buildDefaultHudWidgets(Math.max(3, timeCursor), params.script_lines)
+  const baseWidgets = buildDefaultHudWidgets(Math.max(3, timeCursor), params.script_lines, params.bundle)
     .filter((w) => w.type !== "SUBTITLE_BAR");
 
   return {
@@ -254,7 +332,34 @@ export function generateVideoStoryboard(params: {
 export function buildDefaultHudWidgets(
   durationSec = 6,
   scriptLines?: readonly string[],
+  bundle?: EpochSceneBundle,
 ): HudWidgetSpec[] {
+  const firstFig = bundle?.figures[0];
+  const activePolityIds = Array.from(
+    new Set(
+      (bundle?.snapshot.territories.features ?? [])
+        .map((f) => f.properties.polity_id)
+        .filter((x): x is string => Boolean(x)),
+    ),
+  );
+  const primaryPolityId = activePolityIds[0] ?? "polity-samanid";
+  const disputed = bundle?.snapshot.territories.features.find((f) => f.properties.zone_semantics === "DISPUTED_OVERLAP");
+  const pipFocus = (() => {
+    const sea = bundle?.water_labels?.find((w) => w.kind === "SEA" && w.coordinates[1] < 22);
+    if (sea) return { label: sea.name_zh, center: sea.coordinates, zoom: 4.1 };
+    if (disputed) {
+      const center = computePolylabel(disputed.geometry.coordinates[0] ?? []).center;
+      return { label: "争议焦点放大", center, zoom: 5.8 };
+    }
+    const frontier = bundle?.toponyms.find((t) => t.entity_rank === "PASS_FORT" || t.entity_rank === "MAJOR_CITY");
+    if (frontier) return { label: `${frontier.name_zh} 局部`, center: frontier.coordinates, zoom: 5.5 };
+    return {
+      label: "区域局部小图",
+      center: bundle?.default_camera.center ?? ([52.2, 35.8] as [number, number]),
+      zoom: (bundle?.default_camera.zoom ?? 4.5) + 1.1,
+    };
+  })();
+
   return [
     {
       widget_id: "hud-date-era",
@@ -268,10 +373,10 @@ export function buildDefaultHudWidgets(
       widget_id: "hud-figure-pin",
       type: "FIGURE_PORTRAIT_PIN",
       anchor: "MAP_COORDINATE",
-      map_coordinates: [68.2, 41.6],
+      map_coordinates: firstFig?.coordinates ?? bundle?.default_camera.center ?? [68.2, 41.6],
       visible_from_sec: 0,
       visible_to_sec: durationSec,
-      data_binding: { figure_id: "fig-ahmad-i", label: "艾哈迈德一世" },
+      data_binding: { figure_id: firstFig?.figure_id ?? "default-fig", label: firstFig?.name_zh ?? "历史人物" },
     },
     {
       widget_id: "hud-coalition-sidebar",
@@ -279,7 +384,7 @@ export function buildDefaultHudWidgets(
       anchor: "LEFT_SIDEBAR",
       visible_from_sec: 0,
       visible_to_sec: durationSec,
-      data_binding: { title: "参战阵营名录", polity_ids: ["polity-samanid", "polity-ziyarid", "polity-abbasid"] },
+      data_binding: { title: "参战/核心政权名录", polity_ids: activePolityIds.slice(0, 6) },
     },
     {
       widget_id: "hud-polity-dashboard",
@@ -287,7 +392,7 @@ export function buildDefaultHudWidgets(
       anchor: "TOP_RIGHT",
       visible_from_sec: 0,
       visible_to_sec: durationSec,
-      data_binding: { polity_id: "polity-samanid", show_capital: true, show_area_index: true },
+      data_binding: { polity_id: primaryPolityId, show_capital: true, show_area_index: true },
     },
     {
       widget_id: "hud-chronicle-overlay",
@@ -295,7 +400,7 @@ export function buildDefaultHudWidgets(
       anchor: "RIGHT_SIDEBAR",
       visible_from_sec: 0,
       visible_to_sec: durationSec,
-      data_binding: { title: "编年大事记", max_items: 3 },
+      data_binding: { title: bundle?.chronicle_notes?.heading ?? "编年大事记", max_items: 3 },
     },
     {
       widget_id: "hud-subtitle-main",
@@ -304,7 +409,7 @@ export function buildDefaultHudWidgets(
       visible_from_sec: 0,
       visible_to_sec: durationSec,
       data_binding: {
-        text: scriptLines?.[0] ?? "公元928年，德莱木军南下雷伊，萨曼王朝与齐亚尔王朝共享疆界重组。",
+        text: scriptLines?.[0] ?? bundle?.subtitle_default ?? bundle?.events[0]?.summary ?? "",
       },
     },
     {
@@ -313,55 +418,9 @@ export function buildDefaultHudWidgets(
       anchor: "BOTTOM_CENTER",
       visible_from_sec: 0,
       visible_to_sec: durationSec,
-      data_binding: { focus_label: "赫拉特飞地 / 雷伊局部", center: [52.2, 35.8], zoom: 5.8 },
+      data_binding: { focus_label: pipFocus.label, center: pipFocus.center, zoom: pipFocus.zoom },
     },
   ];
-}
-
-/**
- * Two-stage topology transition classifier (P5 anti-spiderweb safeguard):
- * - Same shared-arc connectivity -> continuous vertex interpolation (`STREAMLINE_ARC_MORPH`)
- * - Structural split/merge/new enclave -> fallback (`OCCUPATION_RIPPLE | WIPE_MASK | CROSS_DISSOLVE`)
- */
-export function classifyTopologyTransition(
-  fromSnapshot: MapSnapshot,
-  toSnapshot: MapSnapshot,
-  preferredFallback: NonNullable<DirectorKeyframe["topology_change_fallback"]> = "OCCUPATION_RIPPLE",
-): TopologyTransitionPlan {
-  const fromArcs = new Set(fromSnapshot.boundaries.features.map((f) => f.properties.arc_id));
-  const toArcs = new Set(toSnapshot.boundaries.features.map((f) => f.properties.arc_id));
-
-  const shared: string[] = [];
-  const changed: string[] = [];
-  for (const id of fromArcs) {
-    if (toArcs.has(id)) shared.push(id);
-    else changed.push(id);
-  }
-  for (const id of toArcs) {
-    if (!fromArcs.has(id)) changed.push(id);
-  }
-
-  const sameFaceTopology =
-    fromSnapshot.territories.features.length === toSnapshot.territories.features.length
-    && changed.length === 0;
-
-  if (sameFaceTopology) {
-    return {
-      is_homeomorphic: true,
-      mode: "STREAMLINE_ARC_MORPH",
-      shared_arc_ids: shared,
-      added_or_removed_arcs: [],
-      reason_zh: "共享弧段起止节点与面连通性不变，启用等距重采样顶点流式插值。",
-    };
-  }
-
-  return {
-    is_homeomorphic: false,
-    mode: preferredFallback,
-    shared_arc_ids: shared,
-    added_or_removed_arcs: changed,
-    reason_zh: `检测到跨纪元拓扑结构变化（${changed.length} 条弧段增减），自动切换为 ${preferredFallback} 防穿帮过渡。`,
-  };
 }
 
 export function interpolateDirectorState(
@@ -371,20 +430,34 @@ export function interpolateDirectorState(
   camera: DirectorKeyframe["camera"];
   historical_jdn: number;
   active_keyframe: DirectorKeyframe | undefined;
+  next_keyframe: DirectorKeyframe | undefined;
+  morph_progress: number;
+  style_id?: string;
+  layer_config?: LayerVisibilityConfig;
+  enable_ghost_previous_border: boolean;
 } {
   if (keyframes.length === 0) {
     return {
-      camera: { center: [60.8, 37.5], zoom: 4.5, bearing_deg: 0, pitch_deg: 0 },
-      historical_jdn: JDN_928_JAN,
+      camera: { center: [67.5, 37.5], zoom: 4.1, bearing_deg: 0, pitch_deg: 0 },
+      historical_jdn: JDN_960,
       active_keyframe: undefined,
+      next_keyframe: undefined,
+      morph_progress: 1,
+      enable_ghost_previous_border: false,
     };
   }
   const sorted = [...keyframes].sort((a, b) => a.video_time_sec - b.video_time_sec);
   if (videoTimeSec <= sorted[0]!.video_time_sec) {
+    const k = sorted[0]!;
     return {
-      camera: sorted[0]!.camera,
-      historical_jdn: sorted[0]!.historical_jdn,
-      active_keyframe: sorted[0],
+      camera: k.camera,
+      historical_jdn: k.historical_jdn,
+      active_keyframe: k,
+      next_keyframe: sorted[1],
+      morph_progress: 0,
+      ...(k.style_id ? { style_id: k.style_id } : {}),
+      ...(k.layer_config ? { layer_config: k.layer_config } : {}),
+      enable_ghost_previous_border: Boolean(k.enable_ghost_previous_border),
     };
   }
   const last = sorted[sorted.length - 1]!;
@@ -393,6 +466,11 @@ export function interpolateDirectorState(
       camera: last.camera,
       historical_jdn: last.historical_jdn,
       active_keyframe: last,
+      next_keyframe: undefined,
+      morph_progress: 1,
+      ...(last.style_id ? { style_id: last.style_id } : {}),
+      ...(last.layer_config ? { layer_config: last.layer_config } : {}),
+      enable_ghost_previous_border: Boolean(last.enable_ghost_previous_border),
     };
   }
 
@@ -414,26 +492,33 @@ export function interpolateDirectorState(
       ? 4 * u * u * u
       : 1 - ((-2 * u + 2) ** 3) / 2;
 
+  // Parabolic zoom dip during CAMERA_FLY_TO long pans
+  const dist = Math.hypot(k1.camera.center[0] - k0.camera.center[0], k1.camera.center[1] - k0.camera.center[1]);
+  const flyDip = k1.easing === "CAMERA_FLY_TO" ? Math.min(0.85, dist * 0.04) * Math.sin(Math.PI * u) : 0;
+
+  const morphWindow = Math.max(0.25, Math.min(span, k1.morph_transition_sec ?? span));
+  const morphProgress = Math.max(0, Math.min(1, (videoTimeSec - k0.video_time_sec) / morphWindow));
+
   return {
     camera: {
       center: [
         k0.camera.center[0] + (k1.camera.center[0] - k0.camera.center[0]) * eased,
         k0.camera.center[1] + (k1.camera.center[1] - k0.camera.center[1]) * eased,
       ],
-      zoom: k0.camera.zoom + (k1.camera.zoom - k0.camera.zoom) * eased,
+      zoom: Number((k0.camera.zoom + (k1.camera.zoom - k0.camera.zoom) * eased - flyDip).toFixed(3)),
       bearing_deg: k0.camera.bearing_deg + (k1.camera.bearing_deg - k0.camera.bearing_deg) * eased,
       pitch_deg: k0.camera.pitch_deg + (k1.camera.pitch_deg - k0.camera.pitch_deg) * eased,
     },
     historical_jdn: k0.historical_jdn + (k1.historical_jdn - k0.historical_jdn) * eased,
     active_keyframe: k0,
+    next_keyframe: k1,
+    morph_progress: morphProgress,
+    ...(k0.style_id ? { style_id: k0.style_id } : {}),
+    ...(k0.layer_config ? { layer_config: k0.layer_config } : {}),
+    enable_ghost_previous_border: Boolean(k1.enable_ghost_previous_border ?? k0.enable_ghost_previous_border),
   };
 }
 
-/**
- * Compute pixel boxes and G5 safe-area compliance across 16:9 / 9:16 / 1:1 / 21:9.
- * On 9:16 vertical mode, sidebars automatically reflow/collapse away from Douyin/Bilibili
- * right interaction rails and bottom caption zones unless `autoReflow` is explicitly disabled.
- */
 export function layoutHudWidgetsForAspect(params: {
   widgets: readonly HudWidgetSpec[];
   aspect_ratio: VideoExportJobSpec["aspect_ratio"];
@@ -441,6 +526,8 @@ export function layoutHudWidgetsForAspect(params: {
   canvas_width?: number;
   canvas_height?: number;
   auto_reflow_vertical?: boolean;
+  custom_positions?: Readonly<Record<string, { x_pct: number; y_pct: number }>>;
+  figure_pins?: ReadonlyArray<{ figure_id: string; coordinates: [number, number] }>;
   project_map_coord?: (lonLat: [number, number]) => [number, number];
 }): AspectSafeAreaLayout {
   const defaultDims = getResolutionDimensions(params.aspect_ratio, "1080p");
@@ -452,8 +539,8 @@ export function layoutHudWidgetsForAspect(params: {
   const safeMargins = isVertical
     ? {
         top: Math.round(height * 0.08),
-        right: Math.round(width * 0.14), // Douyin / Bilibili right interaction column
-        bottom: Math.round(height * 0.18), // Bottom video description & bar
+        right: Math.round(width * 0.14),
+        bottom: Math.round(height * 0.18),
         left: Math.round(width * 0.04),
       }
     : {
@@ -506,96 +593,14 @@ export function layoutHudWidgetsForAspect(params: {
   const scaleY = height / (isVertical ? 1920 : 1080);
   const subtitleHeight = Math.round(78 * scaleY);
   const hasVisibleSubtitle = params.widgets.some(
-    (w) =>
-      w.type === "SUBTITLE_BAR"
-      && params.video_time_sec >= w.visible_from_sec
-      && params.video_time_sec <= w.visible_to_sec,
+    (w) => w.type === "SUBTITLE_BAR" && params.video_time_sec >= w.visible_from_sec && params.video_time_sec <= w.visible_to_sec,
   );
   const subtitleReserve = hasVisibleSubtitle ? subtitleHeight + 18 : 8;
 
   let topStackY = placementMargins.top;
   let bottomPipOffset = 0;
 
-  for (const widget of params.widgets) {
-    const visible =
-      params.video_time_sec >= widget.visible_from_sec
-      && params.video_time_sec <= widget.visible_to_sec;
-
-    let effectiveAnchor = widget.anchor;
-    let collapsedForVertical = false;
-    if (isVertical && autoReflow) {
-      if (widget.anchor === "LEFT_SIDEBAR" || widget.anchor === "RIGHT_SIDEBAR" || widget.anchor === "TOP_RIGHT") {
-        effectiveAnchor = "TOP_LEFT";
-        collapsedForVertical = true;
-      }
-    }
-
-    let bbox: ScreenBox;
-
-    if (widget.type === "DATE_ERA_BADGE") {
-      const w = Math.round(280 * scaleX);
-      const h = Math.round(64 * scaleY);
-      bbox = { x: placementMargins.left, y: topStackY, width: w, height: h };
-      if (visible) topStackY += h + 10;
-    } else if (widget.type === "SUBTITLE_BAR") {
-      const w = Math.round(width - placementMargins.left - placementMargins.right);
-      bbox = {
-        x: placementMargins.left,
-        y: height - placementMargins.bottom - subtitleHeight - 8,
-        width: Math.max(200, w),
-        height: subtitleHeight,
-      };
-    } else if (widget.type === "PIP_INSET_MAP") {
-      const w = Math.round(220 * scaleX);
-      const h = Math.round(140 * scaleY);
-      if (isVertical && autoReflow) {
-        bbox = {
-          x: placementMargins.left,
-          y: height - placementMargins.bottom - subtitleReserve - h - bottomPipOffset,
-          width: w,
-          height: h,
-        };
-      } else {
-        bbox = {
-          x: width - placementMargins.right - w,
-          y: height - placementMargins.bottom - subtitleReserve - h - bottomPipOffset,
-          width: w,
-          height: h,
-        };
-      }
-      if (visible) bottomPipOffset += h + 10;
-    } else if (widget.type === "FIGURE_PORTRAIT_PIN") {
-      const w = Math.round(160 * scaleX);
-      const h = Math.round(92 * scaleY);
-      const [px, py] = widget.map_coordinates && params.project_map_coord
-        ? params.project_map_coord(widget.map_coordinates)
-        : [Math.round(width * 0.45), Math.round(height * 0.48)];
-      const minClearY = isVertical && autoReflow ? Math.max(placementMargins.top, topStackY + 8) : placementMargins.top;
-      bbox = {
-        x: Math.max(placementMargins.left, Math.min(width - placementMargins.right - w, Math.round(px - w / 2))),
-        y: Math.max(minClearY, Math.min(height - placementMargins.bottom - subtitleReserve - h, Math.round(py - h / 2))),
-        width: w,
-        height: h,
-      };
-    } else if (effectiveAnchor === "LEFT_SIDEBAR") {
-      const w = Math.round(250 * scaleX);
-      const h = Math.round(250 * scaleY);
-      bbox = { x: placementMargins.left, y: Math.round(height * 0.22), width: w, height: h };
-    } else if (effectiveAnchor === "RIGHT_SIDEBAR") {
-      const w = Math.round(280 * scaleX);
-      const h = Math.round(230 * scaleY);
-      bbox = { x: width - placementMargins.right - w, y: Math.round(height * 0.25), width: w, height: h };
-    } else if (effectiveAnchor === "TOP_RIGHT") {
-      const w = Math.round(290 * scaleX);
-      const h = Math.round(140 * scaleY);
-      bbox = { x: width - placementMargins.right - w, y: placementMargins.top, width: w, height: h };
-    } else {
-      const w = Math.round((width - placementMargins.left - placementMargins.right) * 0.92);
-      const h = collapsedForVertical ? Math.round(50 * scaleY) : Math.round(110 * scaleY);
-      bbox = { x: placementMargins.left, y: topStackY, width: Math.max(180, w), height: h };
-      if (visible) topStackY += h + 8;
-    }
-
+  const checkBox = (id: string, type: string, bbox: ScreenBox, visible: boolean): { inSafeArea: boolean; violationReason?: string } => {
     let inSafeArea =
       bbox.x >= safeMargins.left - 1
       && bbox.y >= safeMargins.top - 1
@@ -621,26 +626,130 @@ export function layoutHudWidgetsForAspect(params: {
           break;
         }
       }
-      activeBoxes.push({ id: widget.widget_id, bbox });
-
+      activeBoxes.push({ id, bbox });
       if (!inSafeArea) {
         issues.push({
           gate: "G5",
           code: "HUD_SAFE_AREA_VIOLATION",
-          entity_id: widget.widget_id,
-          message: `HUD 挂件 ${widget.widget_id} (${widget.type}) 在 ${params.aspect_ratio} 画幅下校验失败：${violationReason}`,
+          entity_id: id,
+          message: `HUD 挂件 ${id} (${type}) 在 ${params.aspect_ratio} 画幅下校验失败：${violationReason}`,
         });
       }
     }
+    return { inSafeArea, ...(violationReason !== undefined ? { violationReason } : {}) };
+  };
 
+  for (const widget of params.widgets) {
+    const visible = params.video_time_sec >= widget.visible_from_sec && params.video_time_sec <= widget.visible_to_sec;
+    let effectiveAnchor = widget.anchor;
+    let collapsedForVertical = false;
+    if (isVertical && autoReflow) {
+      if (widget.anchor === "LEFT_SIDEBAR" || widget.anchor === "RIGHT_SIDEBAR" || widget.anchor === "TOP_RIGHT") {
+        effectiveAnchor = "TOP_LEFT";
+        collapsedForVertical = true;
+      }
+    }
+
+    let bbox: ScreenBox;
+    if (widget.type === "DATE_ERA_BADGE") {
+      const w = isVertical ? Math.round(740 * scaleX) : Math.round(280 * scaleX);
+      const h = isVertical ? Math.round(180 * scaleY) : Math.round(64 * scaleY);
+      bbox = { x: placementMargins.left, y: topStackY, width: w, height: h };
+      if (visible) topStackY += h + (isVertical ? 28 : 10);
+    } else if (widget.type === "SUBTITLE_BAR") {
+      const w = Math.round(width - placementMargins.left - placementMargins.right);
+      bbox = {
+        x: placementMargins.left,
+        y: height - placementMargins.bottom - subtitleHeight - 8,
+        width: Math.max(200, w),
+        height: subtitleHeight,
+      };
+    } else if (widget.type === "PIP_INSET_MAP") {
+      const w = isVertical ? Math.round(380 * scaleX) : Math.round(220 * scaleX);
+      const h = isVertical ? Math.round(220 * scaleY) : Math.round(140 * scaleY);
+      bbox = {
+        x: isVertical && autoReflow ? placementMargins.left : width - placementMargins.right - w,
+        y: height - placementMargins.bottom - subtitleReserve - h - bottomPipOffset,
+        width: w,
+        height: h,
+      };
+      if (visible) bottomPipOffset += h + 10;
+    } else if (widget.type === "FIGURE_PORTRAIT_PIN") {
+      const w = Math.round(150 * scaleX);
+      const h = Math.round(84 * scaleY);
+      const pins = params.figure_pins && params.figure_pins.length > 0
+        ? params.figure_pins
+        : [{ figure_id: widget.widget_id, coordinates: widget.map_coordinates ?? ([64, 38] as [number, number]) }];
+      const minClearY = isVertical && autoReflow ? Math.max(placementMargins.top, topStackY + 8) : placementMargins.top;
+      let primaryBbox: ScreenBox = { x: placementMargins.left, y: minClearY, width: w, height: h };
+      let allPinsSafe = true;
+      let firstReason: string | undefined;
+
+      pins.forEach((pin, idx) => {
+        const [px, py] = params.project_map_coord
+          ? params.project_map_coord(pin.coordinates)
+          : [Math.round(width * (0.4 + idx * 0.14)), Math.round(height * 0.48)];
+        const pBox: ScreenBox = {
+          x: Math.max(placementMargins.left, Math.min(width - placementMargins.right - w, Math.round(px - w / 2))),
+          y: Math.max(minClearY, Math.min(height - placementMargins.bottom - subtitleReserve - h, Math.round(py - h / 2))),
+          width: w,
+          height: h,
+        };
+        if (idx === 0) primaryBbox = pBox;
+        const res = checkBox(idx === 0 ? widget.widget_id : `${widget.widget_id}:${pin.figure_id}`, widget.type, pBox, visible);
+        if (!res.inSafeArea) {
+          allPinsSafe = false;
+          firstReason ??= res.violationReason;
+        }
+      });
+
+      placed.push({
+        widget,
+        effective_anchor: effectiveAnchor,
+        collapsed_for_vertical: collapsedForVertical,
+        visible_at_time: visible,
+        bbox: primaryBbox,
+        in_safe_area: allPinsSafe,
+        ...(firstReason !== undefined ? { violation_reason: firstReason } : {}),
+      });
+      continue;
+    } else if (effectiveAnchor === "LEFT_SIDEBAR") {
+      const w = Math.round(250 * scaleX);
+      const h = Math.round(260 * scaleY);
+      bbox = { x: placementMargins.left, y: Math.round(height * 0.22), width: w, height: h };
+    } else if (effectiveAnchor === "RIGHT_SIDEBAR") {
+      const w = Math.round(270 * scaleX);
+      const h = Math.round(220 * scaleY);
+      bbox = { x: width - placementMargins.right - w, y: Math.round(height * 0.24), width: w, height: h };
+    } else if (effectiveAnchor === "TOP_RIGHT") {
+      const w = Math.round(290 * scaleX);
+      const h = Math.round(135 * scaleY);
+      bbox = { x: width - placementMargins.right - w, y: placementMargins.top, width: w, height: h };
+    } else {
+      const w = Math.round((width - placementMargins.left - placementMargins.right) * 0.92);
+      const h = collapsedForVertical ? Math.round(150 * scaleY) : Math.round(110 * scaleY);
+      bbox = { x: placementMargins.left, y: topStackY, width: Math.max(180, w), height: h };
+      if (visible) topStackY += h + (isVertical ? 14 : 8);
+    }
+
+    const custom = params.custom_positions?.[widget.widget_id];
+    if (custom && !(isVertical && collapsedForVertical)) {
+      bbox = {
+        ...bbox,
+        x: Math.round((custom.x_pct / 100) * width),
+        y: Math.round((custom.y_pct / 100) * height),
+      };
+    }
+
+    const res = checkBox(widget.widget_id, widget.type, bbox, visible);
     placed.push({
       widget,
       effective_anchor: effectiveAnchor,
       collapsed_for_vertical: collapsedForVertical,
       visible_at_time: visible,
       bbox,
-      in_safe_area: inSafeArea,
-      ...(violationReason !== undefined ? { violation_reason: violationReason } : {}),
+      in_safe_area: res.inSafeArea,
+      ...(res.violationReason !== undefined ? { violation_reason: res.violationReason } : {}),
     });
   }
 
@@ -651,10 +760,6 @@ export function layoutHudWidgetsForAspect(params: {
     safe_margins: safeMargins,
     restricted_zones: restrictedZones,
     placed_widgets: placed,
-    g5_hud_gate: {
-      gate: "G5",
-      passed: issues.length === 0,
-      issues,
-    },
+    g5_hud_gate: { gate: "G5", passed: issues.length === 0, issues },
   };
 }
