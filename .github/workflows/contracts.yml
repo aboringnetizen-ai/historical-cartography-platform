@@ -15,3 +15,28 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+
+  postgis:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:17-3.7
+        env:
+          POSTGRES_PASSWORD: cartography_ci_only
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run test:postgis --workspace @historical-cartography/topo-core
+        env:
+          CARTOGRAPHY_TEST_DATABASE_URL: postgresql://postgres:cartography_ci_only@127.0.0.1:${{ job.services.postgres.ports[5432] }}/postgres
