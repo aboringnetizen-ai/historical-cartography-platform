@@ -14,6 +14,12 @@
     "integration_branch": "master",
     "status": "Phase 0 基线已在干净检出验收。"
   },
+  "current_handoff": {
+    "branch": "backend/core",
+    "verified_commit": "09fedd2c0c04aac27f85b26ab753a9c181eb3169",
+    "status": "阶段一的草稿拓扑、古地理整段吸附与只读平滑预览已在真实数据库复跑。",
+    "documentation": "packages/topo-core/README.md"
+  },
   "packages": {
     "shared-schema": {
       "owner": "Codex",
@@ -25,9 +31,20 @@
     "topo-core": {
       "owner": "Codex",
       "phase": 1,
-      "status": "planned",
-      "implemented": [],
-      "remaining": ["分纪元 PostGIS 拓扑", "共享弧段与平滑", "变更事务与门禁", "928 年黄金测试"]
+      "status": "in_progress",
+      "implemented": [
+        "分纪元与分修订的 PostGIS 原生拓扑",
+        "共享弧段、面种子、覆盖检验和只读地图快照",
+        "失败原子回滚与向前迁移",
+        "时代古地理参考线登记与整段吸附",
+        "保留骨架和端点的有界平滑预览"
+      ],
+      "remaining": [
+        "G1.5 的分形维数、微折角、邻边与地标联动",
+        "事件绑定的 ChangeSet 编辑、证据核验、锁定和审核",
+        "子段自然吸附、空间差异、正式提交、历史回滚与编辑 MCP",
+        "有真实史料的 928 年黄金用例"
+      ]
     },
     "scholar-agent": {
       "owner": "后端 AI 2",
@@ -67,6 +84,22 @@
         "packages/shared-schema/test/historical-time.test.ts": "eed4bbf1fa41498837e1058332573a92e2f9b5e204cd610f717485937244f70d"
       },
       "acceptance": "A-00 和 A-01 通过。"
+    },
+    {
+      "command": "npm run check && npm run test:postgis --workspace @historical-cartography/topo-core",
+      "date": "2026-11-22",
+      "result": "PASS",
+      "environment": "本地 Windows，Node v24.19.0，PostgreSQL 17.10，PostGIS 与 PostGIS Topology 3.7.0",
+      "source": "固定提交的干净检出和隔离的真实数据库",
+      "commit": "09fedd2c0c04aac27f85b26ab753a9c181eb3169",
+      "summary": "类型检查、4 项纪年测试与 8 项数据库集成测试通过。",
+      "input_sha256": {
+        "packages/topo-core/migrations/001_topology.sql": "e38eb383fffef6e87e066ea364671a7d76fa5a3fbd12b74f791a52b5fbe6bf3b",
+        "packages/topo-core/migrations/002_paleo_references.sql": "95f23c4b2518ee9eecfce2dd632cc8f64bf9d0c8d603d91e02c27e188bca0e06",
+        "packages/topo-core/src/spline-preview.ts": "5559309d97d6592bf08f9b6e32a61dc8cdfd193366e7b55bc0e7066acf2988f8",
+        "packages/topo-core/test/postgis.integration.ts": "51e3a50e69cf820063aca3f88a730cb634730bf53593549fc4553f5a9208914c"
+      },
+      "acceptance": "A-10、A-11 和 A-12 的草稿拓扑子项通过，项目级门禁待正式编辑、地标和史料集成。"
     }
   ],
   "hard_gate_acceptance": {
@@ -81,9 +114,23 @@
     {
       "task_id": "C-01",
       "owner": "Codex",
-      "status": "planned",
-      "next_action": "落实独立纪元、共享弧段、草稿初始化与可版本化快照。",
+      "status": "review",
+      "next_action": "在 backend/core 上由消费者用实际草稿快照接口核对地图接入。A-10 与 A-11 的正式事务用例由 C-03/C-04 补齐。",
       "acceptance_ids": ["A-10", "A-11"]
+    },
+    {
+      "task_id": "C-02",
+      "owner": "Codex",
+      "status": "in_progress",
+      "next_action": "在平滑候选上补分形维数、微折角、邻接、地标归属和 G1.5 的完整硬门禁。",
+      "acceptance_ids": ["A-11", "A-12"]
+    },
+    {
+      "task_id": "C-03",
+      "owner": "Codex",
+      "status": "planned",
+      "next_action": "实现事件绑定的空间变更事务与回滚，并联调后端 AI 2 的真实引文核验接口。",
+      "acceptance_ids": ["A-10", "A-13", "A-14"]
     },
     {
       "task_id": "C-05",
@@ -94,7 +141,8 @@
     }
   ],
   "next_tasks": [
-    {"task_id": "C-01", "owner": "Codex"},
+    {"task_id": "C-02", "owner": "Codex"},
+    {"task_id": "C-03", "owner": "Codex"},
     {"task_id": "S-01", "owner": "后端 AI 2"},
     {"task_id": "S-02", "owner": "后端 AI 2"},
     {"task_id": "F-01", "owner": "Gemini"}
