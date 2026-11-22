@@ -15,13 +15,10 @@
     "status": "Phase 0 基线已在干净检出验收。"
   },
   "current_handoff": {
-    "branch": "backend/core",
-    "verified_commit": "9f29f7fa9045d19aae9c14b92a84ee58bba3f4c0",
-    "status": "草稿与史料首版已联验。真实引文可打开草稿与送审，原件变更后旧送审失效并阻止再次送审。",
-    "documentation": "packages/topo-core/README.md",
-    "integration_trial_branch": "integration/core-studio",
-    "integration_trial_commit": "3f68d241b1d7cb7dfa0320cbf2371ee0d45bc5ff",
-    "scholar_integration_branch": "integration/core-scholar-studio",
+    "branch": "integration/core-scholar-studio",
+    "verified_commit": "611b81b71f9be45a6ede32cefd0e56ab94ff98f3",
+    "status": "工作台只读 HTTP、真实 PostGIS 变更差异和定步进视频后端已验。正式地图写入与真实工作台的视频联验待完成。",
+    "documentation": "docs/服务契约交接.md",
     "scholar_integration_verified_commit": "b84ed7a9d3645cadbe8bfd083235f259277bbffa"
   },
   "packages": {
@@ -44,13 +41,14 @@
         "保留骨架和端点的有界平滑预览及单弧段 G1.5，含分形维数、微折角、邻边和地标归属",
         "绑定真实证据读取接口的变更集草稿与事件版本固定、再核验",
         "微单元草稿移交、人工锁定、乐观并发控制、审计事件与回滚",
-        "受草稿头与人工锁保护的送审事务，调用真实 ScholarEvents 并在证据失效时撤销旧送审"
+        "受草稿头与人工锁保护的送审事务，调用真实 ScholarEvents 并在证据失效时撤销旧送审",
+        "工作台目录、真实地图快照、引文核验 HTTP 和同一事务的 Before/After 草稿差异"
       ],
       "remaining": [
         "变更集多弧段组合校验、正式审核与提交",
-        "子段自然吸附、边界移动、空间差异、历史回滚与编辑 MCP",
+        "子段自然吸附、边界移动、历史回滚与编辑 MCP",
         "正式地图写入时再次核对真实史料、人工审批与空间门禁",
-        "与工作台统一 HTTP 场景读模型及附属资料来源",
+        "与前端联验真实项目场景接口与地图发布",
         "有真实史料的 928 年黄金用例"
       ]
     },
@@ -90,9 +88,13 @@
     "video-renderer": {
       "owner": "Codex",
       "phase": 4,
-      "status": "planned",
-      "implemented": [],
-      "remaining": ["分镜与遥测", "拓扑过渡", "确定性渲染及双画幅烟测", "FFmpeg 编码与发布资产"]
+      "status": "in_progress",
+      "implemented": [
+        "本地 Chromium 视频任务加载、逐帧修订与 G5 检查、确定性帧 SHA-256",
+        "FFmpeg H.264、HEVC、WebM Alpha、ProRes 4444，SRT 和可选 T1 书目附录",
+        "1080p 横竖双画幅工程烟测，失败帧清理，两个 Alpha 容器透明像素实测"
+      ],
+      "remaining": ["真实工作台加载任务与导播联验", "共享弧段插值与突变遮罩的正式回放", "4K 和 60fps 负载、分层包与交互网页包"]
     }
   },
   "latest_verification": [
@@ -168,6 +170,22 @@
         "packages/topo-core/src/review-submission.ts": "b5e1e9146df04e5b826bb107e2c49e324986a435f6b9fb23c3dbbeda7e4e1149"
       },
       "acceptance": "真实 T1 文本送审及 G3 版本失配拒绝的联合子项通过，正式地图发布、928 年史实验收和其他语种 OCR 待办。"
+    },
+    {
+      "command": "npm ci && npm run check && npm run test:postgis --workspace @historical-cartography/topo-core && npm run test:scholar-topology && npm run test:render --workspace @historical-cartography/video-renderer",
+      "date": "2026-11-22",
+      "result": "PASS",
+      "environment": "Windows 干净检出，Node v24.19.0、PostgreSQL 17.10、PostGIS 3.7.0、Edge 无头模式、FFmpeg/FFprobe 9.1",
+      "source": "合并分支固定提交，后端包与 HTTP/Pg/编码工程用例",
+      "commit": "611b81b71f9be45a6ede32cefd0e56ab94ff98f3",
+      "summary": "类型检查、28 项常规测试、20 项 PostGIS、1 项真实史料及工作台 HTTP、1 项 Chromium/FFmpeg 烟测全部通过。",
+      "input_sha256": {
+        "scripts/studio-read-api.ts": "6b882ed3831b5d5846cdc0bfca8c9094c2995e7a5701efa4f4417befccc3fb75",
+        "packages/topo-core/src/change-diff.ts": "bd786e29f1a75344e73711a3e7e37e79e4f6c640e45035732649756a2768e027",
+        "packages/video-renderer/src/index.ts": "afca55dfedec6829422a7c58331820f79158f33349aeca8147bb16a6c02ba90a",
+        "packages/video-renderer/test/render.integration.ts": "dd0da1c7a9640ec7934308e1f00b4fb401ef9a0b4cadbe638f47762ae646a067"
+      },
+      "acceptance": "后端 A-32 子项通过。A-41 至 A-43 完成工程场景的关键子项，真实画布与正式发布仍需联合验收。"
     }
   ],
   "source_review_smoke": {
@@ -204,7 +222,7 @@
       "task_id": "C-03",
       "owner": "Codex",
       "status": "in_progress",
-      "next_action": "继续实现边界编辑与可审阅的差异，并沿送审时的原件复核方式接入正式提交门禁。",
+      "next_action": "继续实现边界编辑，并用已联验的证据复核和真实差异接入正式提交。",
       "acceptance_ids": ["A-10", "A-13", "A-14"]
     },
     {
@@ -220,6 +238,7 @@
     {"task_id": "C-04", "owner": "Codex"},
     {"task_id": "C-05", "owner": "Codex"},
     {"task_id": "S-04", "owner": "WorkBuddy 6.2 Astra"},
-    {"task_id": "F-03", "owner": "Gemini"}
+    {"task_id": "F-03", "owner": "Gemini"},
+    {"task_id": "V-03", "owner": "Codex"}
   ]
 }
