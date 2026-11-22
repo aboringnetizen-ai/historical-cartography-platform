@@ -5,8 +5,10 @@ import { after, before, test } from "node:test";
 import pg from "pg";
 import type { LineString } from "geojson";
 import { createHistoricalTimestamp } from "@historical-cartography/shared-schema";
+import type { EventEvidenceReader, EventEvidenceResult, EvidenceCitation, HistoricalEvent } from "@historical-cartography/shared-schema";
 import {
-  checkSharedArcSmoothing, createDraftTopologyRevision, migrateTopology, previewSharedArcSmoothing, readMapSnapshot,
+  checkSharedArcSmoothing, createDraftTopologyRevision, migrateTopology, openMapChangeSet,
+  previewSharedArcSmoothing, readMapSnapshot,
   registerLandmarkInventory, registerPaleoReference,
 } from "../src/index.ts";
 import type {
@@ -75,7 +77,7 @@ test("migrations are atomic and repeatable without repeating applied work", asyn
   );
   const first = await readLedger();
   assert.deepEqual(first.rows.map(({ filename }) => filename), [
-    "001_topology.sql", "002_paleo_references.sql", "003_smoothing_checks.sql",
+    "001_topology.sql", "002_paleo_references.sql", "003_smoothing_checks.sql", "004_open_changesets.sql",
   ]);
   await migrateTopology(pool);
   assert.deepEqual((await readLedger()).rows, first.rows);
@@ -420,4 +422,116 @@ test("native spline inspection rejects a neighbouring edge crossing", async () =
   );
   assert.match(rows[0]?.topology_error ?? "", /non-boundary intersection/i);
   assert.deepEqual(await readMapSnapshot(pool, { revision_id: revisionId, historical_jdn: year(948) }), snapshot);
+});
+
+async function changeSetRequest(name: string, astronomicalYear: number) {
+  const epoch = {
+    epoch_id: name, valid_from_jdn: year(astronomicalYear), valid_to_jdn: year(astronomicalYear + 1),
+  };
+  const base_revision_id = await createDraftTopologyRevision(pool, { ...studyArea(), epoch });
+  return {
+    changeset_id: randomUUID(), epoch_id: epoch.epoch_id, base_revision_id, branch_name: "working",
+    author_id: "fixture-editor", author_type: "AI_AGENT" as const, bound_event_ids: ["fixture-event"],
+  };
+}
+
+// Adapter response fixtures check the storage boundary. Real source OCR and
+// archive verification belong to the scholarship service integration suite.
+function verifiedEvent(
+  hist_event_id: string,
+  credibility_tier: EvidenceCitation["credibility_tier"] = "T1_PRIMARY_AND_LOCAL_ACADEMIC",
+  conflict_status: HistoricalEvent["conflict_status"] = "CONSENSUS",
+): Extract<EventEvidenceResult, { status: "VERIFIED" }> {
+  const citation: EvidenceCitation = {
+    citation_id: `${hist_event_id}-citation`, source_doc_id: "evidence-contract-fixture", credibility_tier,
+    page_number: "1", ocr_line_range: [3, 3], verbatim_quote: "Synthetic citation for interface testing.",
+    verified_by_human: false,
+  };
+  return {
+    status: "VERIFIED",
+    event_revision: "event-v1",
+    event: {
+      hist_event_id, title: "Engineering fixture", summary: "Draft opening test",
+      event_category: "OTHER", time_start: createHistoricalTimestamp({ astronomical_year: 950 }),
+      involved_polity_ids: [], involved_toponym_ids: [], involved_figure_ids: [],
+      spatial_impact_description: "Synthetic case", citations: [citation],
+      highest_credibility_tier: credibility_tier, conflict_status,
+    },
+    verified_citations: [{
+      citation_id: citation.citation_id, source_doc_id: citation.source_doc_id, index_revision: "index-v1",
+      evidence: { ...citation },
+    }],
+  };
+}
+
+test("opening a change set pins evidence and supports concurrent idempotent retries", async () => {
+  const request = await changeSetRequest("draft-change-open", 950);
+  const reader: EventEvidenceReader = { async verifyEvent({ hist_event_id }) { return verifiedEvent(hist_event_id); } };
+  const [first, concurrent] = await Promise.all([
+    openMapChangeSet(pool, reader, request), openMapChangeSet(pool, reader, request),
+  ]);
+  assert.equal(first.status, "OPENED");
+  assert.equal(first.changeset.status, "DRAFT");
+  assert.equal(first.changeset.gate_report.g2_event_binding_passed, true);
+  assert.equal(first.changeset.gate_report.g1_topology_passed, false);
+  assert.deepEqual(first.bound_events, [{
+    hist_event_id: "fixture-event", event_revision: "event-v1", citation_indexes: [{
+      citation_id: "fixture-event-citation", source_doc_id: "evidence-contract-fixture", index_revision: "index-v1",
+    }],
+  }]);
+  assert.deepEqual(concurrent, first);
+  const unreachable = { async verifyEvent() { assert.fail("Retry must reuse pinned evidence"); } };
+  assert.deepEqual(await openMapChangeSet(pool, unreachable, request), first);
+  await assert.rejects(openMapChangeSet(pool, unreachable, { ...request, branch_name: "other" }), /different request/);
+  const counts = await pool.query<{ changesets: number; bindings: number }>(
+    `SELECT (SELECT count(*)::int FROM cartography.spatial_changesets WHERE changeset_id = $1) AS changesets,
+            (SELECT count(*)::int FROM cartography.changeset_event_bindings WHERE changeset_id = $1) AS bindings`,
+    [request.changeset_id],
+  );
+  assert.deepEqual(counts.rows, [{ changesets: 1, bindings: 1 }]);
+});
+
+test("draft opening rejects missing bindings and mismatched quotations without residual writes", async () => {
+  const request = await changeSetRequest("draft-change-reject", 951);
+  const unreachable = { async verifyEvent() { assert.fail("Invalid request must not query evidence"); } };
+  const noEvents = await openMapChangeSet(pool, unreachable, { ...request, bound_event_ids: [] });
+  assert.equal(noEvents.status, "REJECTED");
+  assert.equal(noEvents.issues[0]?.code, "EVENT_REQUIRED");
+  const wrongEpoch = await openMapChangeSet(pool, unreachable, { ...request, epoch_id: "different-epoch" });
+  assert.equal(wrongEpoch.status, "REJECTED");
+  assert.equal(wrongEpoch.issues[0]?.code, "INVALID_TOPOLOGY");
+  const mismatched: EventEvidenceReader = {
+    async verifyEvent({ hist_event_id }) {
+      const response = verifiedEvent(hist_event_id);
+      if (hist_event_id === "wrong-page") response.verified_citations[0]!.evidence.page_number = "2";
+      return response;
+    },
+  };
+  const rejected = await openMapChangeSet(pool, mismatched, {
+    ...request, bound_event_ids: ["valid-fixture", "wrong-page"],
+  });
+  assert.equal(rejected.status, "REJECTED");
+  assert.equal(rejected.issues[0]?.entity_id, "wrong-page");
+  const unavailable = await openMapChangeSet(pool, {
+    async verifyEvent() { throw new Error("Simulated service connection failure"); },
+  }, request);
+  assert.equal(unavailable.status, "REJECTED");
+  const rows = await pool.query("SELECT * FROM cartography.change_branches WHERE epoch_id = $1", [request.epoch_id]);
+  assert.equal(rows.rowCount, 0);
+});
+
+test("a verified lower-tier or disputed draft remains pending human review", async () => {
+  const request = await changeSetRequest("draft-change-review", 952);
+  const reader: EventEvidenceReader = {
+    async verifyEvent({ hist_event_id }) {
+      return hist_event_id === "in-dispute"
+        ? verifiedEvent(hist_event_id, "T1_PRIMARY_AND_LOCAL_ACADEMIC", "T1_SCHOLARLY_DISPUTE")
+        : verifiedEvent(hist_event_id, "T3_GENERAL_ENCYCLOPEDIA");
+    },
+  };
+  const result = await openMapChangeSet(pool, reader, { ...request, bound_event_ids: ["in-dispute", "only-lead"] });
+  assert.equal(result.status, "OPENED");
+  assert.equal(result.changeset.status, "PENDING_HUMAN_REVIEW");
+  assert.equal(result.changeset.gate_report.g3_provenance_quote_passed, false);
+  assert.deepEqual(result.issues.map(({ code }) => code), ["T1_SCHOLARLY_DISPUTE", "PENDING_T1_VERIFICATION"]);
 });

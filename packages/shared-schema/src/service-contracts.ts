@@ -1,5 +1,5 @@
 import type { FeatureCollection, LineString, Polygon } from "geojson";
-import type { EvidenceCitation, HistoricalEvent, TerritorialFace } from "./canonical.ts";
+import type { EvidenceCitation, HistoricalEvent, SpatialChangeSet, TerritorialFace } from "./canonical.ts";
 import type { GateIssue } from "./gates.ts";
 
 // Service read models. Canonical entities and their persistence fields live in canonical.ts.
@@ -63,3 +63,29 @@ export type EventEvidenceResult =
 export interface EventEvidenceReader {
   verifyEvent(request: EventEvidenceRequest): Promise<EventEvidenceResult>;
 }
+
+export interface OpenMapChangeSetRequest {
+  changeset_id: string;
+  base_revision_id: string;
+  epoch_id: string;
+  branch_name: string;
+  author_type: SpatialChangeSet["author_type"];
+  author_id: string;
+  bound_event_ids: readonly string[];
+}
+
+export interface BoundEventRevision {
+  hist_event_id: string;
+  event_revision: string;
+  citation_indexes: Array<Pick<VerifiedCitation, "citation_id" | "source_doc_id" | "index_revision">>;
+}
+
+export type OpenMapChangeSetResult =
+  | {
+    status: "OPENED";
+    changeset: SpatialChangeSet;
+    base_revision_id: string;
+    bound_events: BoundEventRevision[];
+    issues: readonly GateIssue[];
+  }
+  | { status: "REJECTED"; issues: readonly GateIssue[] };
