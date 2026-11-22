@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { after, before, test } from "node:test";
 import pg from "pg";
 import type { LineString } from "geojson";
 import { createHistoricalTimestamp } from "@historical-cartography/shared-schema";
-import { createDraftTopologyRevision, migrateTopology, readMapSnapshot, registerPaleoReference } from "../src/index.ts";
-import type { DraftFaceSeed, DraftTopologyInput, PaleoLineReference } from "../src/index.ts";
+import {
+  createDraftTopologyRevision, migrateTopology, previewSharedArcSmoothing, readMapSnapshot, registerPaleoReference,
+} from "../src/index.ts";
+import type { ArcSplineRequest, DraftFaceSeed, DraftTopologyInput, PaleoLineReference } from "../src/index.ts";
 
 const testDatabaseUrl = process.env.CARTOGRAPHY_TEST_DATABASE_URL;
 if (!testDatabaseUrl) {
@@ -51,6 +54,18 @@ function studyArea(): DraftTopologyInput {
   };
 }
 
+function splineRequest(revision_id: string, historical_jdn: number, arc_id: string): ArcSplineRequest {
+  return {
+    revision_id, historical_jdn, arc_id,
+    viewport: { west: 60, south: 36, east: 62, north: 38 },
+    profile: {
+      simplify_area_ratio: 0.00005,
+      spline_tension: 0.55,
+      max_hausdorff_deviation_km: 5,
+    },
+  };
+}
+
 test("migrations are atomic and repeatable without repeating applied work", async () => {
   const readLedger = () => pool.query<{ filename: string; sha256: string }>(
     "SELECT filename, sha256 FROM cartography_migrations.applied ORDER BY filename",
@@ -68,6 +83,45 @@ test("migrations are atomic and repeatable without repeating applied work", asyn
     await pool.query("UPDATE cartography_migrations.applied SET sha256 = $1 WHERE filename = '001_topology.sql'", [
       first.rows[0]?.sha256,
     ]);
+  }
+});
+
+test("the reference migration preserves drafts created on the preceding schema", async () => {
+  const upgradeName = `cartography_upgrade_${randomUUID().replaceAll("-", "")}`;
+  const upgradeUrl = new URL(disposableUrl);
+  upgradeUrl.pathname = `/${upgradeName}`;
+  await admin.query(`CREATE DATABASE ${upgradeName}`);
+  const previous = new pg.Pool({ connectionString: upgradeUrl.toString() });
+  try {
+    const previousFilename = "001_topology.sql";
+    const previousSql = (await readFile(new URL(`../migrations/${previousFilename}`, import.meta.url), "utf8"))
+      .replaceAll("\r\n", "\n");
+    await previous.query(previousSql);
+    await previous.query(`
+      CREATE SCHEMA cartography_migrations;
+      CREATE TABLE cartography_migrations.applied (
+        filename text PRIMARY KEY, sha256 text NOT NULL, applied_at timestamptz NOT NULL DEFAULT transaction_timestamp()
+      );
+    `);
+    await previous.query("INSERT INTO cartography_migrations.applied (filename, sha256) VALUES ($1, $2)", [
+      previousFilename, createHash("sha256").update(previousSql).digest("hex"),
+    ]);
+    const revisionId = randomUUID();
+    const input = studyArea();
+    await previous.query("SELECT cartography.build_draft_topology($1, $2, $3, $4, $5, $6, $7)", [
+      revisionId, input.epoch.epoch_id, input.epoch.valid_from_jdn, input.epoch.valid_to_jdn,
+      JSON.stringify(input.coverage_boundaries), JSON.stringify(input.internal_boundaries), JSON.stringify(input.faces),
+    ]);
+    const priorSnapshot = await previous.query("SELECT cartography.read_map_snapshot($1, $2) AS snapshot", [
+      revisionId, year(928),
+    ]);
+    assert.equal(priorSnapshot.rows[0]?.snapshot?.data_status, "DRAFT");
+    await migrateTopology(previous);
+    const snapshot = await readMapSnapshot(previous, { revision_id: revisionId, historical_jdn: year(928) });
+    assert.deepEqual(snapshot, priorSnapshot.rows[0]?.snapshot);
+  } finally {
+    await previous.end();
+    await admin.query(`DROP DATABASE ${upgradeName}`);
   }
 });
 
@@ -212,4 +266,37 @@ test("a paleo boundary uses the reference of its own epoch with zero deviation",
     [JSON.stringify(snapped[0].geometry), JSON.stringify(reference.geometry)],
   );
   assert.deepEqual(rows, [{ distance: 0 }]);
+  const preview = await previewSharedArcSmoothing(pool, splineRequest(
+    revisionId, year(941), snapped[0].properties.arc_id,
+  ));
+  assert.equal(preview?.status, "NATURAL_REFERENCE");
+  assert.deepEqual(preview?.rendered_spline_geometry, snapped[0].geometry);
+});
+
+test("spline candidates preserve endpoints and cannot overwrite native arcs", async () => {
+  const revisionId = await createDraftTopologyRevision(pool, {
+    ...studyArea(),
+    epoch: { epoch_id: "spline-fixture", valid_from_jdn: year(942), valid_to_jdn: year(943) },
+    internal_boundaries: [line([[61, 36], [61.075, 36.5], [60.95, 37], [61.1, 37.5], [61, 38]])],
+  });
+  const snapshotRequest = { revision_id: revisionId, historical_jdn: year(942) };
+  const beforePreview = await readMapSnapshot(pool, snapshotRequest);
+  const shared = beforePreview?.boundaries.features.find(({ properties }) => properties.left_face_id && properties.right_face_id);
+  assert.ok(shared);
+  const request = splineRequest(revisionId, year(942), shared.properties.arc_id);
+  const preview = await previewSharedArcSmoothing(pool, request);
+  assert.equal(preview?.status, "CANDIDATE");
+  assert.deepEqual(preview.canonical_geometry, shared.geometry);
+  assert.ok(preview.rendered_spline_geometry.coordinates.length > shared.geometry.coordinates.length);
+  assert.deepEqual(preview.rendered_spline_geometry.coordinates[0], shared.geometry.coordinates[0]);
+  assert.deepEqual(preview.rendered_spline_geometry.coordinates.at(-1), shared.geometry.coordinates.at(-1));
+  assert.ok(preview.measured_max_deviation_km <= preview.deviation_limit_km);
+  assert.ok(preview.deviation_limit_km < request.profile.max_hausdorff_deviation_km);
+
+  const rejected = await previewSharedArcSmoothing(pool, {
+    ...request, profile: { ...request.profile, max_hausdorff_deviation_km: 0.000001 },
+  });
+  assert.equal(rejected?.status, "REJECTED");
+  assert.equal(rejected.reason, "DEVIATION_LIMIT");
+  assert.deepEqual(await readMapSnapshot(pool, snapshotRequest), beforePreview);
 });

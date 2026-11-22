@@ -7,8 +7,11 @@ import type {
   MapSnapshot,
   MapSnapshotRequest,
 } from "@historical-cartography/shared-schema";
+import { deriveSplinePreview } from "./spline-preview.ts";
+import type { ArcSplinePreview, ArcSplineRequest } from "./spline-preview.ts";
 
 export { migrateTopology } from "./migrate.ts";
+export type { ArcSplinePreview, ArcSplineRequest } from "./spline-preview.ts";
 
 export interface DraftFaceSeed extends Omit<MapFaceProperties, "boundary_arc_ids"> {
   seed: Point;
@@ -70,4 +73,18 @@ export async function readMapSnapshot(pool: Pool, request: MapSnapshotRequest): 
     if (featureId !== undefined) properties.snapped_paleo_feature_id = featureId;
   }
   return row.snapshot;
+}
+
+export async function previewSharedArcSmoothing(pool: Pool, request: ArcSplineRequest): Promise<ArcSplinePreview | null> {
+  const snapshot = await readMapSnapshot(pool, request);
+  const boundary = snapshot?.boundaries.features.find(({ properties }) => properties.arc_id === request.arc_id);
+  if (!boundary) return null;
+  if (boundary.properties.snapped_paleo_feature_id !== undefined) {
+    return {
+      status: "NATURAL_REFERENCE",
+      canonical_geometry: boundary.geometry,
+      rendered_spline_geometry: boundary.geometry,
+    };
+  }
+  return deriveSplinePreview(pool, boundary.geometry, request);
 }
