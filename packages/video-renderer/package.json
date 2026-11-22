@@ -1,0 +1,14 @@
+{
+  "name": "@historical-cartography/video-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "test:render": "node --test test/render.integration.ts"
+  },
+  "dependencies": {
+    "@historical-cartography/shared-schema": "4.0.0",
+    "playwright-core": "1.65.1"
+  }
+}
