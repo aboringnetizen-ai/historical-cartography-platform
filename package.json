@@ -13,10 +13,15 @@
     "typecheck": "tsc --project tsconfig.json",
     "test": "node --test \"packages/**/*.test.ts\"",
     "check": "npm run typecheck && npm test",
-    "test:scholar-topology": "node --test test/scholar-topology.integration.ts"
+    "test:scholar-topology": "node --test test/scholar-topology.integration.ts",
+    "studio:api": "node scripts/studio-api.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "@types/pg": "^8.23.1"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
   }
 }

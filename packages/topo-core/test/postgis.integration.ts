@@ -8,7 +8,7 @@ import { createHistoricalTimestamp } from "@historical-cartography/shared-schema
 import type { EventEvidenceReader, EventEvidenceResult, EvidenceCitation, HistoricalEvent } from "@historical-cartography/shared-schema";
 import {
   checkSharedArcSmoothing, createDraftTopologyRevision, migrateTopology, openMapChangeSet,
-  previewSharedArcSmoothing, readMapChangeDraft, readMapSnapshot, reassignBaseUnits, recheckMapChangeEvidence, registerDraftFaceLock,
+  previewSharedArcSmoothing, readMapChangeDiff, readMapChangeDraft, readMapSnapshot, reassignBaseUnits, recheckMapChangeEvidence, registerDraftFaceLock,
   registerLandmarkInventory, registerPaleoReference, rollbackDraftReassignment, submitMapChangeForReview,
 } from "../src/index.ts";
 import type {
@@ -572,6 +572,20 @@ test("unit reassignment preserves the previous geometry, records event impacts a
   )));
   assert.deepEqual(await readMapSnapshot(pool, baseRequest), original);
   assert.deepEqual(await readMapChangeDraft(pool, draft.changeset_id), { revision_id: first.revision_id, operations: [first] });
+  const requestDiff = {
+    changeset_id: draft.changeset_id, expected_revision_id: first.revision_id, historical_jdn: year(953),
+  };
+  const preview = await readMapChangeDiff(pool, requestDiff);
+  assert.equal(preview.status, "READY");
+  assert.deepEqual(preview.changed_face_ids, ["west"]);
+  assert.equal(preview.diff.before_snapshot.revision_id, draft.base_revision_id);
+  assert.equal(preview.diff.after_snapshot.revision_id, first.revision_id);
+  assert.deepEqual(preview.diff.affected_arc_ids, first.affected_arc_ids);
+  assert.deepEqual(preview.diff.changeset.operations_log, [first]);
+  assert.deepEqual(await readMapChangeDiff(pool, { ...requestDiff, historical_jdn: year(954) }), { status: "OUTSIDE_EPOCH" });
+  assert.deepEqual(await readMapChangeDiff(pool, { ...requestDiff, expected_revision_id: draft.base_revision_id }), {
+    status: "DRAFT_CHANGED",
+  });
   await assert.rejects(reassignBaseUnits(pool, { ...request, operation_id: randomUUID() }), { code: "40001" });
 });
 
@@ -614,6 +628,9 @@ test("rolling back draft operations restores each prior revision and retains aud
   assert.deepEqual(await readMapChangeDraft(pool, draft.changeset_id), {
     revision_id: draft.base_revision_id, operations: [undoneFirst, undoneSecond],
   });
+  assert.deepEqual(await readMapChangeDiff(pool, {
+    changeset_id: draft.changeset_id, expected_revision_id: draft.base_revision_id, historical_jdn: year(955),
+  }), { status: "NO_CHANGES" });
   assert.deepEqual(await reassignBaseUnits(pool, request), undoneFirst);
   assert.ok(await readMapSnapshot(pool, { revision_id: second.revision_id, historical_jdn: year(955) }));
 });

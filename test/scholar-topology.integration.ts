@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdtemp, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import pg from "pg";
 import { createHistoricalTimestamp } from "@historical-cartography/shared-schema";
-import type { HistoricalEvent, SourceDocument } from "@historical-cartography/shared-schema";
+import type { EpochSceneBundle, EventEvidenceResult, HistoricalEvent, SourceDocument, StudioSceneIndexItem } from "@historical-cartography/shared-schema";
 import { ScholarEvents } from "@historical-cartography/scholar-agent/events";
 import { EvidenceStore } from "@historical-cartography/scholar-agent/evidence";
 import {
   createDraftTopologyRevision, migrateTopology, openMapChangeSet, readMapChangeDraft,
   readMapSnapshot, reassignBaseUnits, submitMapChangeForReview,
 } from "@historical-cartography/topo-core";
+import { createStudioReadApi } from "../scripts/studio-read-api.ts";
 
 const databaseUrl = process.env.CARTOGRAPHY_TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error("Set CARTOGRAPHY_TEST_DATABASE_URL to a development PostgreSQL/PostGIS server");
@@ -149,4 +151,60 @@ test("a reviewed transcription reaches spatial review; changing the original blo
   assert.equal(changedVersion.status, "BLOCKED");
   assert.equal(changedVersion.reason, "EVIDENCE");
   assert.match(changedVersion.issues[0]?.message ?? "", /event or citation index revision changed/);
+
+  const server = await createStudioReadApi({
+    pool, evidence: events, sources: [document], scenes: [{
+      revision_id: first.expected_revision_id, draft_changeset_id: first.changeset_id, sample_jdn: historical_jdn,
+      epoch_label_zh: "联合测试", historical_year_display: "1832 年", is_demo_fixture: true,
+      default_camera: { center: [0.5, 0.5], zoom: 6 }, event_ids: [event.hist_event_id],
+    }],
+  });
+  server.listen(0, "127.0.0.1");
+  try {
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const origin = "http://127.0.0.1:" + address.port;
+    const post = async (path: string, body: object) => fetch(origin + path, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const index = await fetch(origin + "/api/v4/scenes");
+    assert.equal(index.status, 200);
+    const { scenes } = await index.json() as { scenes: StudioSceneIndexItem[] };
+    assert.equal(scenes.length, 1);
+    const scene = scenes[0];
+    assert.ok(scene);
+    const response = await post("/api/v4/map-snapshots/query", {
+      revision_id: "latest", historical_jdn: scene.sample_jdn,
+    });
+    assert.equal(response.status, 200);
+    const bundle = await response.json() as EpochSceneBundle;
+    assert.equal(bundle.revision_id, scene.revision_id);
+    assert.equal(bundle.data_status, "DRAFT");
+    assert.equal(bundle.is_demo_fixture, true);
+    assert.equal(bundle.snapshot.territories.features.length, 1);
+    assert.equal(bundle.snapshot.territories.features[0]?.id, "test-unit");
+    assert.equal(bundle.diff_record?.before_snapshot.territories.features[0]?.properties.control_score, 0);
+    assert.equal(bundle.diff_record?.after_snapshot.territories.features[0]?.properties.control_score, 25);
+    assert.equal(bundle.diff_record?.changeset.changeset_id, first.changeset_id);
+    assert.equal(bundle.diff_record?.changeset.status, "DRAFT");
+    assert.ok(bundle.diff_record?.affected_arc_ids.length);
+    assert.ok(bundle.snapshot.boundaries.features.length > 0);
+    assert.equal(bundle.events.length, 1);
+    assert.ok(bundle.sources[0]?.source_url);
+    assert.equal(bundle.sources[0]?.local_path, undefined);
+    const evidence = await post("/api/v4/evidence/verify", { hist_event_id: bundle.events[0]?.hist_event_id });
+    const evidenceBody = await evidence.json() as EventEvidenceResult;
+    assert.equal(evidenceBody.status, "VERIFIED");
+    assert.equal(evidenceBody.verified_citations[0]?.evidence.page_number, "file:1");
+
+    const absent = await post("/api/v4/map-snapshots/query", {
+      revision_id: scene.revision_id, historical_jdn: scene.epoch.valid_to_jdn,
+    });
+    assert.equal(absent.status, 404);
+    const unlisted = await post("/api/v4/evidence/verify", { hist_event_id: "unlisted" });
+    assert.equal((await unlisted.json() as EventEvidenceResult).status, "REJECTED");
+  } finally {
+    if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

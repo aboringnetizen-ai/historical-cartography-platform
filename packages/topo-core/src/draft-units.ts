@@ -6,7 +6,7 @@ export async function registerDraftFaceLock(pool: Pool, revisionId: string, face
   await pool.query("SELECT cartography.register_draft_face_lock($1, $2)", [revisionId, faceId]);
 }
 
-export async function readMapChangeDraft(pool: Pool, changeSetId: string): Promise<MapChangeDraft | null> {
+export async function readMapChangeDraft(pool: Pick<Pool, "query">, changeSetId: string): Promise<MapChangeDraft | null> {
   const { rows } = await pool.query<MapChangeDraft>(`
     SELECT coalesce(h.revision_id, b.base_revision_id) AS revision_id,
       coalesce((

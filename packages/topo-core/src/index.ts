@@ -4,7 +4,6 @@ import type { Pool } from "pg";
 import type {
   EpochRange,
   MapFaceProperties,
-  MapSnapshot,
   MapSnapshotRequest,
 } from "@historical-cartography/shared-schema";
 import { deriveSplinePreview } from "./spline-preview.ts";
@@ -13,6 +12,8 @@ import { checkSplineCandidate } from "./smoothing-gate.ts";
 import type { ArcSmoothingCheck, ArcSmoothingCheckRequest } from "./smoothing-gate.ts";
 
 export { migrateTopology } from "./migrate.ts";
+export { readMapChangeDiff } from "./change-diff.ts";
+export { readMapSnapshot } from "./snapshot.ts";
 export { openMapChangeSet, recheckMapChangeEvidence } from "./changesets.ts";
 export { submitMapChangeForReview } from "./review-submission.ts";
 export { readMapChangeDraft, reassignBaseUnits, registerDraftFaceLock, rollbackDraftReassignment } from "./draft-units.ts";
@@ -61,25 +62,6 @@ export async function createDraftTopologyRevision(pool: Pool, input: DraftTopolo
     ],
   );
   return revisionId;
-}
-
-export async function readMapSnapshot(pool: Pool, request: MapSnapshotRequest): Promise<MapSnapshot | null> {
-  if (!Number.isFinite(request.historical_jdn)) {
-    throw new RangeError("historical_jdn must be finite");
-  }
-  const { rows } = await pool.query<{ snapshot: MapSnapshot | null; paleo_features: Record<string, string> }>(
-    `SELECT cartography.read_map_snapshot($1::uuid, $2) AS snapshot,
-       coalesce(jsonb_object_agg($1::uuid::text || ':arc:' || edge_id, feature_id), '{}'::jsonb) AS paleo_features
-     FROM cartography.paleo_arc_bindings WHERE revision_id = $1`,
-    [request.revision_id, request.historical_jdn],
-  );
-  const row = rows[0];
-  if (!row?.snapshot) return null;
-  for (const { properties } of row.snapshot.boundaries.features) {
-    const featureId = row.paleo_features[properties.arc_id];
-    if (featureId !== undefined) properties.snapped_paleo_feature_id = featureId;
-  }
-  return row.snapshot;
 }
 
 export async function previewSharedArcSmoothing(pool: Pool, request: ArcSplineRequest): Promise<ArcSplinePreview | null> {

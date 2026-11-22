@@ -9,7 +9,13 @@
     "erasableSyntaxOnly": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["packages/**/*.ts", "test/scholar-topology.integration.ts"]
+  "include": [
+    "packages/**/*.ts",
+    "test/scholar-topology.integration.ts",
+    "scripts/**/*.ts"
+  ]
 }
