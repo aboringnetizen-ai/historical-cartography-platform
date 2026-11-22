@@ -1,0 +1,231 @@
+{
+  "notice": "真实网络检索回执；仅为书目线索，未下载或核验原文。",
+  "runs": [
+    {
+      "searched_at": "2026-11-22T06:35:33.966Z",
+      "query": {
+        "terms": [
+          "manuscripts",
+          "写本"
+        ],
+        "era": "medieval",
+        "region": "Dunhuang"
+      },
+      "queries": [
+        {
+          "provider": "archive",
+          "query": "manuscripts medieval Dunhuang",
+          "url": "https://archive.org/advancedsearch.php?q=mediatype%3Atexts+AND+%22manuscripts%22+AND+%22medieval%22+AND+%22Dunhuang%22&fl%5B%5D=identifier%2Ctitle%2Ccreator%2Clanguage%2Csubject%2Cdescription%2Cdate%2Cexternal-identifier&rows=3&output=json"
+        },
+        {
+          "provider": "archive",
+          "query": "写本 medieval Dunhuang",
+          "url": "https://archive.org/advancedsearch.php?q=mediatype%3Atexts+AND+%22%E5%86%99%E6%9C%AC%22+AND+%22medieval%22+AND+%22Dunhuang%22&fl%5B%5D=identifier%2Ctitle%2Ccreator%2Clanguage%2Csubject%2Cdescription%2Cdate%2Cexternal-identifier&rows=3&output=json"
+        }
+      ],
+      "errors": [],
+      "results": [
+        {
+          "document": {
+            "title": "Buddhism and Taoism face to face : scripture, ritual, and iconographic exchange in medieval China",
+            "authors": [
+              "Mollier, Christine, author"
+            ],
+            "language": "eng",
+            "medium": "INTERNET_ARCHIVE",
+            "publication_year": 2008,
+            "source_doc_id": "archive:buddhismtaoismfa0000moll",
+            "source_url": "https://archive.org/details/buddhismtaoismfa0000moll",
+            "credibility_tier": "T3_GENERAL_ENCYCLOPEDIA",
+            "is_local_academic_journal": false,
+            "ocr_indexed": false,
+            "fetched_at_iso": "2026-11-22T06:35:33.966Z"
+          },
+          "basis": "metadata_only",
+          "score": 43,
+          "origins": [
+            {
+              "provider": "archive",
+              "query": "manuscripts medieval Dunhuang",
+              "url": "https://archive.org/advancedsearch.php?q=mediatype%3Atexts+AND+%22manuscripts%22+AND+%22medieval%22+AND+%22Dunhuang%22&fl%5B%5D=identifier%2Ctitle%2Ccreator%2Clanguage%2Csubject%2Cdescription%2Cdate%2Cexternal-identifier&rows=3&output=json",
+              "sourceUrl": "https://archive.org/details/buddhismtaoismfa0000moll",
+              "metadata_sha256": "90120c0fedd37610f85fc07e13604775449a61717af2ead0ac13e8b12bb4252f"
+            }
+          ]
+        },
+        {
+          "document": {
+            "title": "Saved from Desert Sands: Re-discovering Objects on the Silk Roads",
+            "authors": [
+              "Multiple authors"
+            ],
+            "language": "und",
+            "medium": "INTERNET_ARCHIVE",
+            "source_doc_id": "archive:granger-galambos-2024-silk-road",
+            "source_url": "https://archive.org/details/granger-galambos-2024-silk-road",
+            "credibility_tier": "T3_GENERAL_ENCYCLOPEDIA",
+            "is_local_academic_journal": false,
+            "ocr_indexed": false,
+            "fetched_at_iso": "2026-11-22T06:35:33.966Z"
+          },
+          "basis": "metadata_only",
+          "score": 43,
+          "origins": [
+            {
+              "provider": "archive",
+              "query": "manuscripts medieval Dunhuang",
+              "url": "https://archive.org/advancedsearch.php?q=mediatype%3Atexts+AND+%22manuscripts%22+AND+%22medieval%22+AND+%22Dunhuang%22&fl%5B%5D=identifier%2Ctitle%2Ccreator%2Clanguage%2Csubject%2Cdescription%2Cdate%2Cexternal-identifier&rows=3&output=json",
+              "sourceUrl": "https://archive.org/details/granger-galambos-2024-silk-road",
+              "metadata_sha256": "8c2f7d6e89083f88e0b1283449f986f8bb677f546c4e2c284e843c889675d669"
+            }
+          ]
+        },
+        {
+          "document": {
+            "title": "Medieval Chinese medicine : the Dunhuang medical manuscripts",
+            "authors": [],
+            "language": "eng",
+            "medium": "INTERNET_ARCHIVE",
+            "publication_year": 2005,
+            "source_doc_id": "archive:medievalchinesem0000unse",
+            "source_url": "https://archive.org/details/medievalchinesem0000unse",
+            "credibility_tier": "T3_GENERAL_ENCYCLOPEDIA",
+            "is_local_academic_journal": false,
+            "ocr_indexed": false,
+            "fetched_at_iso": "2026-11-22T06:35:33.966Z"
+          },
+          "basis": "metadata_only",
+          "score": 42,
+          "origins": [
+            {
+              "provider": "archive",
+              "query": "manuscripts medieval Dunhuang",
+              "url": "https://archive.org/advancedsearch.php?q=mediatype%3Atexts+AND+%22manuscripts%22+AND+%22medieval%22+AND+%22Dunhuang%22&fl%5B%5D=identifier%2Ctitle%2Ccreator%2Clanguage%2Csubject%2Cdescription%2Cdate%2Cexternal-identifier&rows=3&output=json",
+              "sourceUrl": "https://archive.org/details/medievalchinesem0000unse",
+              "metadata_sha256": "a6a30668a54f68a52363a88915663fced1ff343b52c5945316003bfea0908405"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "searched_at": "2026-11-22T06:35:33.997Z",
+      "query": {
+        "terms": [
+          "manuscripts",
+          "写本"
+        ],
+        "era": "medieval",
+        "region": "Dunhuang"
+      },
+      "queries": [
+        {
+          "provider": "crossref",
+          "query": "manuscripts medieval Dunhuang",
+          "url": "https://api.crossref.org/works?query.bibliographic=manuscripts+medieval+Dunhuang&filter=type%3Ajournal-article&rows=3"
+        },
+        {
+          "provider": "crossref",
+          "query": "写本 medieval Dunhuang",
+          "url": "https://api.crossref.org/works?query.bibliographic=%E5%86%99%E6%9C%AC+medieval+Dunhuang&filter=type%3Ajournal-article&rows=3"
+        }
+      ],
+      "errors": [
+        {
+          "provider": "crossref",
+          "query": "写本 medieval Dunhuang",
+          "url": "https://api.crossref.org/works?query.bibliographic=%E5%86%99%E6%9C%AC+medieval+Dunhuang&filter=type%3Ajournal-article&rows=3",
+          "code": "HTTP",
+          "message": "Error: HTTP 429"
+        }
+      ],
+      "results": [
+        {
+          "document": {
+            "title": "Medieval Chinese Medicine: The Dunhuang Medical Manuscripts",
+            "authors": [
+              "Nathan Sivin"
+            ],
+            "language": "en",
+            "medium": "ACADEMIC_JOURNAL",
+            "publication_year": 2006,
+            "publisher_or_journal": "Social History of Medicine",
+            "source_doc_id": "doi:10.1093/shm/hkl008",
+            "source_url": "https://doi.org/10.1093/shm/hkl008",
+            "credibility_tier": "T3_GENERAL_ENCYCLOPEDIA",
+            "is_local_academic_journal": false,
+            "ocr_indexed": false,
+            "fetched_at_iso": "2026-11-22T06:35:33.997Z"
+          },
+          "basis": "metadata_only",
+          "score": 43,
+          "origins": [
+            {
+              "provider": "crossref",
+              "query": "manuscripts medieval Dunhuang",
+              "url": "https://api.crossref.org/works?query.bibliographic=manuscripts+medieval+Dunhuang&filter=type%3Ajournal-article&rows=3",
+              "sourceUrl": "https://doi.org/10.1093/shm/hkl008",
+              "metadata_sha256": "56081e47b1c7870ffaee8f409aa4b96d457fcd947b2729734fd668151b243e14"
+            }
+          ]
+        },
+        {
+          "document": {
+            "title": "Textual Practices of Literary Training in Medieval China: Evidence from Dunhuang Manuscripts by Christopher M. B. Nugent (review)",
+            "authors": [
+              "Anthony DeBlasi"
+            ],
+            "language": "en",
+            "medium": "ACADEMIC_JOURNAL",
+            "publication_year": 2025,
+            "publisher_or_journal": "Harvard Journal of Asiatic Studies",
+            "source_doc_id": "doi:10.1353/jas.2025.a981162",
+            "source_url": "https://doi.org/10.1353/jas.2025.a981162",
+            "credibility_tier": "T3_GENERAL_ENCYCLOPEDIA",
+            "is_local_academic_journal": false,
+            "ocr_indexed": false,
+            "fetched_at_iso": "2026-11-22T06:35:33.997Z"
+          },
+          "basis": "metadata_only",
+          "score": 43,
+          "origins": [
+            {
+              "provider": "crossref",
+              "query": "manuscripts medieval Dunhuang",
+              "url": "https://api.crossref.org/works?query.bibliographic=manuscripts+medieval+Dunhuang&filter=type%3Ajournal-article&rows=3",
+              "sourceUrl": "https://doi.org/10.1353/jas.2025.a981162",
+              "metadata_sha256": "b279bc640c1cea5c40a109c33b0aff9f181bce9fb5a67026f62edfa2d3256115"
+            }
+          ]
+        },
+        {
+          "document": {
+            "title": "Medieval Chinese Medicine: The Dunhuang Medical Manuscripts (review)",
+            "authors": [],
+            "language": "en",
+            "medium": "ACADEMIC_JOURNAL",
+            "publication_year": 2008,
+            "publisher_or_journal": "Bulletin of the History of Medicine",
+            "source_doc_id": "doi:10.1353/bhm.0.0002",
+            "source_url": "https://doi.org/10.1353/bhm.0.0002",
+            "credibility_tier": "T3_GENERAL_ENCYCLOPEDIA",
+            "is_local_academic_journal": false,
+            "ocr_indexed": false,
+            "fetched_at_iso": "2026-11-22T06:35:33.997Z"
+          },
+          "basis": "metadata_only",
+          "score": 42,
+          "origins": [
+            {
+              "provider": "crossref",
+              "query": "manuscripts medieval Dunhuang",
+              "url": "https://api.crossref.org/works?query.bibliographic=manuscripts+medieval+Dunhuang&filter=type%3Ajournal-article&rows=3",
+              "sourceUrl": "https://doi.org/10.1353/bhm.0.0002",
+              "metadata_sha256": "30cda7333d981b942a7862395c8a26ca4d60061a4f58888d1c162a8d8970a8b1"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

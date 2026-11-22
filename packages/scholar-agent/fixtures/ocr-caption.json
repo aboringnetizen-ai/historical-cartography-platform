@@ -1,0 +1,36 @@
+{
+  "source_sha256": "e78765dcb53348fa3ed44c86ae0e0b2636a65022897bf107922c89d77de1f925",
+  "engine": "tesseract v5.4.0.20240606; map-caption; lang=eng; psm=11",
+  "pages": [
+    {
+      "file_page": 1,
+      "printed_page": "12",
+      "width": 620,
+      "height": 240,
+      "lines": [
+        {
+          "line_number": 1,
+          "text": "PLATE 12",
+          "bbox": [
+            38,
+            33,
+            458,
+            86
+          ],
+          "confidence": 0.95591026
+        },
+        {
+          "line_number": 2,
+          "text": "SCALE 100",
+          "bbox": [
+            38,
+            143,
+            513,
+            196
+          ],
+          "confidence": 0.9556928299999999
+        }
+      ]
+    }
+  ]
+}

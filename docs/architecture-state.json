@@ -27,7 +27,12 @@
       "owner": "Codex",
       "phase": 0,
       "status": "accepted",
-      "implemented": ["Canonical Schema v4.0", "双纪年与日期精度工具", "硬门禁编号与结果类型", "地图和证据服务类型与交接样例"],
+      "implemented": [
+        "Canonical Schema v4.0",
+        "双纪年与日期精度工具",
+        "硬门禁编号与结果类型",
+        "地图和证据服务类型与交接样例"
+      ],
       "remaining": []
     },
     "topo-core": {
@@ -52,26 +57,56 @@
       ]
     },
     "scholar-agent": {
-      "owner": "后端 AI 2",
+      "owner": "WorkBuddy 6.2 Astra",
       "phase": 2,
       "status": "in_progress",
-      "implemented": ["backend/scholar 工作树有实际文本索引与指定页行核验代码，已试跑公开史料摘录的候选与拒绝分支"],
-      "remaining": ["同一固定提交交接检索及 OCR 验收", "可信 T1 审阅及 EventEvidenceReader 联调", "正式 G3 与文献 MCP 验收"]
+      "branch": "backend/scholar",
+      "implemented": [
+        "Internet Archive、Crossref、显式本地文件清单检索",
+        "真实英文图注 OCR、页行与 BBox、原生文本索引",
+        "按原件和索引修订核验引文",
+        "SQLite 事件登记和 EventEvidenceReader（拒绝过期版本、错引和自动解除 T1 分歧）",
+        "受信编目分级、脚注图遍历及五维研究候选；分歧保留双方引文与修订",
+        "stdio 五项文献工具（配置白名单、编目及事件数据库后启用全套）"
+      ],
+      "evidence_paths": [
+        "packages/scholar-agent/fixtures/search-live.json",
+        "packages/scholar-agent/fixtures/ocr-live.json",
+        "packages/scholar-agent/fixtures/voyage-source.json",
+        "packages/scholar-agent/test"
+      ],
+      "remaining": [
+        "中文竖排、横排和多语论文真实样本；旋转旧图验收",
+        "真实脚注自动提取与五维史学样本；人工裁决版本闭环",
+        "跨进程持久索引恢复与稳定 RPC 联调",
+        "与 topo-core 联验 A-13、A-23、A-40；G3 未联合签收"
+      ]
     },
     "carto-studio-web": {
       "owner": "Gemini",
       "reviewer": "Claude",
       "phase": 3,
       "status": "review",
-      "implemented": ["Gemini 在 frontend/studio 提交工作台、风格、时间轴、证据与导播界面，已在试集成分支通过测试和打包"],
-      "remaining": ["统一真实服务场景响应和修订索引", "真实证据与差异联调", "浏览器视觉复查与导出验收"]
+      "implemented": [
+        "Gemini 在 frontend/studio 提交工作台、风格、时间轴、证据与导播界面，已在试集成分支通过测试和打包"
+      ],
+      "remaining": [
+        "统一真实服务场景响应和修订索引",
+        "真实证据与差异联调",
+        "浏览器视觉复查与导出验收"
+      ]
     },
     "video-renderer": {
       "owner": "Codex",
       "phase": 4,
       "status": "planned",
       "implemented": [],
-      "remaining": ["分镜与遥测", "拓扑过渡", "确定性渲染及双画幅烟测", "FFmpeg 编码与发布资产"]
+      "remaining": [
+        "分镜与遥测",
+        "拓扑过渡",
+        "确定性渲染及双画幅烟测",
+        "FFmpeg 编码与发布资产"
+      ]
     }
   },
   "latest_verification": [
@@ -132,6 +167,16 @@
       "commit": "3f68d241b1d7cb7dfa0320cbf2371ee0d45bc5ff",
       "summary": "类型检查、10 项共享和前端测试、18 项数据库集成测试以及 Vite 打包通过。",
       "acceptance": "编译、数据库和打包联检完成。工作台还以演示场景为主，真实 HTTP 场景与浏览器验收待办。"
+    },
+    {
+      "command": "npm run check",
+      "date": "2026-11-22",
+      "source": "backend/scholar 分支，集成前",
+      "environment": "Windows / Node 22.22.2 / Tesseract 5.4.0（eng、osd）",
+      "result": "PASS",
+      "summary": "类型检查及 21 项测试通过，0 跳过。含真实达尔文转录本和实际英文图像 OCR；缺语种、合成脚注和合成争议不是史学验收。",
+      "acceptance": "包级工作切片，非 A-20 至 A-23 整体签收；未接入空间事务。",
+      "commit": "15e1ba91a9f8bbf7c8d41624d65646b57cc75114"
     }
   ],
   "source_review_smoke": {
@@ -155,35 +200,63 @@
       "owner": "Codex",
       "status": "review",
       "next_action": "在 backend/core 上由消费者用实际草稿快照接口核对地图接入。A-10 与 A-11 的正式事务用例由 C-03/C-04 补齐。",
-      "acceptance_ids": ["A-10", "A-11"]
+      "acceptance_ids": [
+        "A-10",
+        "A-11"
+      ]
     },
     {
       "task_id": "C-02",
       "owner": "Codex",
       "status": "review",
       "next_action": "在 C-03/C-04 中联调多弧段组合校验，用真实时代资料与地标复验。",
-      "acceptance_ids": ["A-11", "A-12"]
+      "acceptance_ids": [
+        "A-11",
+        "A-12"
+      ]
     },
     {
       "task_id": "C-03",
       "owner": "Codex",
       "status": "in_progress",
       "next_action": "继续实现空间边界编辑与可审阅的差异，接入真实证据和正式提交门禁。变更集草稿、移交及回滚已通过测试。",
-      "acceptance_ids": ["A-10", "A-13", "A-14"]
+      "acceptance_ids": [
+        "A-10",
+        "A-13",
+        "A-14"
+      ]
     },
     {
       "task_id": "C-05",
       "owner": "Codex",
       "status": "in_progress",
       "next_action": "对齐工作台场景接口，与后端 AI 2 固定可复查的 T1 来源及 928 年相关事件；不同年代解释保持待考证。",
-      "acceptance_ids": ["A-40", "A-50"]
+      "acceptance_ids": [
+        "A-40",
+        "A-50"
+      ]
     }
   ],
   "next_tasks": [
-    {"task_id": "C-03", "owner": "Codex"},
-    {"task_id": "C-04", "owner": "Codex"},
-    {"task_id": "C-05", "owner": "Codex"},
-    {"task_id": "S-04", "owner": "后端 AI 2"},
-    {"task_id": "F-03", "owner": "Gemini"}
+    {
+      "task_id": "C-03",
+      "owner": "Codex"
+    },
+    {
+      "task_id": "C-04",
+      "owner": "Codex"
+    },
+    {
+      "task_id": "C-05",
+      "owner": "Codex"
+    },
+    {
+      "task_id": "S-04",
+      "owner": "WorkBuddy 6.2 Astra"
+    },
+    {
+      "task_id": "F-03",
+      "owner": "Gemini"
+    }
   ]
 }

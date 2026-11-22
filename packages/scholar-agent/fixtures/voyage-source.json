@@ -1,0 +1,9 @@
+{
+  "author":"Charles Darwin", "title":"The Voyage of the Beagle", "chapter":"I: ST. JAGO--CAPE DE VERD ISLANDS",
+  "edition":"Public-domain English transcription, Project Gutenberg ebook 944, GITenberg mirror",
+  "catalogue":"https://www.gutenberg.org/ebooks/944", "upstream_path":"944.txt",
+  "immutable_blob_url":"https://api.github.com/repos/GITenberg/The-Voyage-of-the-Beagle_944/git/blobs/a4390b9e21508301231e6ee934c70a5645dce93a",
+  "upstream_blob":"a4390b9e21508301231e6ee934c70a5645dce93a", "upstream_sha256":"24b8d915eb5f61c091ee66403096bb3a950e3c0cb310caf086b6be0cc86781f1",
+  "upstream_lines":[159,161], "excerpt":"voyage-excerpt.txt", "excerpt_lines":[1,3], "excerpt_normalization":"LF line endings, trailing LF; no other edits.",
+  "scope":"Validates an eyewitness account of a port call and the name used by its author; not a boundary claim. file:1 is a digital excerpt, not a printed folio. No manuscript or facsimile comparison."
+}
