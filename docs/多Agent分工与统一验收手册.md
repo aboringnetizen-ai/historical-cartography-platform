@@ -4,7 +4,7 @@
 
 本手册用于安排两位后端 AI、Gemini 和 Claude 的开发，约定代码归属、交接接口、验收证据与跨会话恢复。产品范围、冻结字段和硬门禁以 [SPEC v4.0](https://docs.google.com/document/d/1pT0K3gbotZX9EasapG4wbJ5LamzTw2QgvxuJ7JDkk6g/edit?usp=sharing) 第 1、9、10、11、12 节为准。本文的任务编号、状态和模板用于协作。
 
-**启动状态** · 当前目录已有本地 Git 初始化、共享契约、纪年工具、4 项纪年测试和 CI 配置。当前工作树的 `npm run check` 已通过。仓库尚无首个提交和远端，Phase 0 尚待在固定提交上完成交接与复跑。后端、前端和视频条目为待办。进度以 [架构状态](architecture-state.json) 为准。
+**启动状态** · Phase 0 基线已固定，干净检出通过类型检查与 4 项纪年测试。可由 [架构状态](architecture-state.json) 取得基线 SHA，由[服务契约交接](服务契约交接.md)取得编译过的地图和证据样例。各包实施进度和验收结果以架构状态为准。
 
 **参考素材** · [江山时序](https://github.com/DeanChensj/jiangshan-map) 用于对照历史地图交互和数据组织。用户提供的 [B 站链接](https://b23.tv/ayPqKcI) 与截图用于对照地图、时间轴和导播风格。引用数据、代码和素材时逐项记录来源及复用条件。历史事件和疆域仍按 SPEC 的证据规则验收。当前只确认了 B 站链接对应的视频页，画面验收可先用已提供的截图。
 
