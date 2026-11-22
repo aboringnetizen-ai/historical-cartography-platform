@@ -93,7 +93,16 @@ export async function deriveSplinePreview(
     "SELECT ST_AsGeoJSON(ST_SimplifyVW(ST_GeomFromGeoJSON($1::jsonb), $2), 15)::jsonb AS geometry",
     [canonicalJson, width * (north - south) * simplify_area_ratio],
   );
-  const candidate = interpolate(simplified.rows[0]?.geometry ?? canonical, spline_tension);
+  const simplifiedCurve = simplified.rows[0]?.geometry;
+  const [firstPoint] = canonical.coordinates;
+  const lastPoint = canonical.coordinates.at(-1);
+  if (simplifiedCurve && firstPoint && lastPoint && simplifiedCurve.coordinates.length >= 2) {
+    // GeoJSON serialization of the simplifier may round coordinates. Keep the
+    // authoritative native endpoints so PostGIS can check the same arc later.
+    simplifiedCurve.coordinates[0] = firstPoint;
+    simplifiedCurve.coordinates[simplifiedCurve.coordinates.length - 1] = lastPoint;
+  }
+  const candidate = interpolate(simplifiedCurve ?? canonical, spline_tension);
   const centerLatitude = (south + north) / 2;
   const localProjection = `+proj=aeqd +lat_0=${centerLatitude} +lon_0=${(west + east) / 2} +datum=WGS84 +units=m +no_defs`;
   const { rows } = await pool.query<{

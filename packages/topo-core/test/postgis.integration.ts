@@ -6,9 +6,12 @@ import pg from "pg";
 import type { LineString } from "geojson";
 import { createHistoricalTimestamp } from "@historical-cartography/shared-schema";
 import {
-  createDraftTopologyRevision, migrateTopology, previewSharedArcSmoothing, readMapSnapshot, registerPaleoReference,
+  checkSharedArcSmoothing, createDraftTopologyRevision, migrateTopology, previewSharedArcSmoothing, readMapSnapshot,
+  registerLandmarkInventory, registerPaleoReference,
 } from "../src/index.ts";
-import type { ArcSplineRequest, DraftFaceSeed, DraftTopologyInput, PaleoLineReference } from "../src/index.ts";
+import type {
+  ArcSmoothingCheckRequest, ArcSplineRequest, DraftFaceSeed, DraftTopologyInput, PaleoLineReference,
+} from "../src/index.ts";
 
 const testDatabaseUrl = process.env.CARTOGRAPHY_TEST_DATABASE_URL;
 if (!testDatabaseUrl) {
@@ -71,7 +74,9 @@ test("migrations are atomic and repeatable without repeating applied work", asyn
     "SELECT filename, sha256 FROM cartography_migrations.applied ORDER BY filename",
   );
   const first = await readLedger();
-  assert.deepEqual(first.rows.map(({ filename }) => filename), ["001_topology.sql", "002_paleo_references.sql"]);
+  assert.deepEqual(first.rows.map(({ filename }) => filename), [
+    "001_topology.sql", "002_paleo_references.sql", "003_smoothing_checks.sql",
+  ]);
   await migrateTopology(pool);
   assert.deepEqual((await readLedger()).rows, first.rows);
   assert.match(first.rows[0]?.sha256 ?? "", /^[0-9a-f]{64}$/);
@@ -271,6 +276,11 @@ test("a paleo boundary uses the reference of its own epoch with zero deviation",
   ));
   assert.equal(preview?.status, "NATURAL_REFERENCE");
   assert.deepEqual(preview?.rendered_spline_geometry, snapped[0].geometry);
+  const checked = await checkSharedArcSmoothing(pool, checkedSplineRequest(
+    splineRequest(revisionId, year(941), snapped[0].properties.arc_id),
+  ));
+  assert.equal(checked?.gate.passed, true);
+  assert.equal(checked?.texture, null);
 });
 
 test("spline candidates preserve endpoints and cannot overwrite native arcs", async () => {
@@ -299,4 +309,115 @@ test("spline candidates preserve endpoints and cannot overwrite native arcs", as
   assert.equal(rejected?.status, "REJECTED");
   assert.equal(rejected.reason, "DEVIATION_LIMIT");
   assert.deepEqual(await readMapSnapshot(pool, snapshotRequest), beforePreview);
+});
+
+function checkedSplineRequest(request: ArcSplineRequest): ArcSmoothingCheckRequest {
+  return {
+    ...request,
+    viewport_width_px: 1_400,
+    profile: { ...request.profile, target_fractal_dim_range: [1.04, 1.22], min_micro_turn_angle_deg: 135 },
+  };
+}
+
+async function meanderFixture(epochId: string, astronomicalYear: number, samples: number, periods: number, amplitude: number) {
+  const structure = studyArea();
+  const jdn = year(astronomicalYear);
+  const boundary = Array.from({ length: samples + 1 }, (_, index) => {
+    const t = index / samples;
+    return [61 + amplitude * Math.sin(2 * Math.PI * periods * t), 36 + 2 * t];
+  });
+  const revisionId = await createDraftTopologyRevision(pool, {
+    ...structure,
+    epoch: { epoch_id: epochId, valid_from_jdn: jdn, valid_to_jdn: year(astronomicalYear + 1) },
+    internal_boundaries: [line(boundary)],
+  });
+  const snapshot = await readMapSnapshot(pool, { revision_id: revisionId, historical_jdn: jdn });
+  assert.ok(snapshot);
+  const edge = snapshot.boundaries.features.find(({ properties }) => properties.left_face_id && properties.right_face_id);
+  assert.ok(edge);
+  const request = checkedSplineRequest(splineRequest(revisionId, jdn, edge.properties.arc_id));
+  request.profile.simplify_area_ratio = 0;
+  return { request, snapshot };
+}
+
+test("G1.5 measures a valid meander and rejects a straight boundary instead of treating missing anchors as success", async () => {
+  const normal = await meanderFixture("normal-shape", 945, 128, 8, 0.065);
+  const unregistered = await checkSharedArcSmoothing(pool, normal.request);
+  assert.equal(unregistered?.gate.passed, false);
+  assert.match(unregistered.gate.issues.map(({ message }) => message).join("\n"), /no registered landmark inventory/);
+  await registerLandmarkInventory(pool, normal.request.revision_id, [{
+    coordinates: [60.5, 37], toponym_id: "safe-fixture", valid_from_jdn: year(945), valid_to_jdn: year(946),
+  }]);
+  const checked = await checkSharedArcSmoothing(pool, normal.request);
+  assert.equal(checked?.gate.passed, true, JSON.stringify(checked?.gate.issues));
+  assert.ok(checked.texture?.measured_fractal_dim);
+  assert.ok(checked.texture.measured_fractal_dim >= 1.04 && checked.texture.measured_fractal_dim <= 1.22);
+  const strictAngles = await checkSharedArcSmoothing(pool, {
+    ...normal.request,
+    viewport_width_px: 320,
+    profile: { ...normal.request.profile, min_micro_turn_angle_deg: 179.9 },
+  });
+  assert.equal(strictAngles?.gate.passed, false);
+  assert.match(strictAngles.gate.issues.map(({ message }) => message).join("\n"), /Micro-turn angle/);
+
+  const straight = await meanderFixture("straight-shape", 946, 8, 1, 0);
+  await registerLandmarkInventory(pool, straight.request.revision_id, []);
+  const rejected = await checkSharedArcSmoothing(pool, straight.request);
+  assert.equal(rejected?.gate.passed, false);
+  assert.match(rejected.gate.issues.map(({ message }) => message).join("\n"), /fractal dimension/);
+  assert.deepEqual(await readMapSnapshot(pool, normal.request), normal.snapshot);
+});
+
+test("G1.5 reports a landmark crossing and removes its scratch topology", async () => {
+  const { request, snapshot } = await meanderFixture("crossing-shape", 947, 64, 6, 0.065);
+  const preview = await previewSharedArcSmoothing(pool, request);
+  assert.equal(preview?.status, "CANDIDATE");
+  const { rows } = await pool.query<{ x: number; y: number }>(`
+    WITH curves AS (
+      SELECT ST_GeomFromGeoJSON($1::jsonb) AS before, ST_GeomFromGeoJSON($2::jsonb) AS after
+    ), comparisons AS (
+      SELECT ST_MakeLine(
+        p.geom, ST_ClosestPoint(curves.before, p.geom)
+      ) AS displacement
+      FROM curves CROSS JOIN LATERAL ST_DumpPoints(curves.after) AS p
+    )
+    SELECT ST_X(ST_LineInterpolatePoint(displacement, 0.5)) AS x,
+      ST_Y(ST_LineInterpolatePoint(displacement, 0.5)) AS y
+    FROM comparisons ORDER BY ST_Length(displacement) DESC LIMIT 1
+  `, [JSON.stringify(preview.canonical_geometry), JSON.stringify(preview.rendered_spline_geometry)]);
+  const point = rows[0];
+  assert.ok(point);
+  const anchor = {
+    coordinates: [point.x, point.y] as [number, number], toponym_id: "on-the-swept-strip",
+    valid_from_jdn: year(947), valid_to_jdn: year(948),
+  };
+  await registerLandmarkInventory(pool, request.revision_id, [anchor]);
+  await registerLandmarkInventory(pool, request.revision_id, [anchor]);
+  await assert.rejects(registerLandmarkInventory(pool, request.revision_id, []), /immutable/);
+  const checked = await checkSharedArcSmoothing(pool, request);
+  assert.ok(checked?.gate.issues.some(({ code, entity_id }) =>
+    code === "TOPONYM_FACE_CHANGED" && entity_id === anchor.toponym_id), JSON.stringify(checked?.gate.issues));
+  assert.deepEqual(await readMapSnapshot(pool, request), snapshot);
+  const scratch = await pool.query("SELECT name FROM topology.topology WHERE name LIKE 'carto_spline_%'");
+  assert.equal(scratch.rowCount, 0);
+});
+
+test("native spline inspection rejects a neighbouring edge crossing", async () => {
+  const revisionId = await createDraftTopologyRevision(pool, {
+    ...studyArea(),
+    epoch: { epoch_id: "adjacent-edge-fixture", valid_from_jdn: year(948), valid_to_jdn: year(949) },
+    internal_boundaries: [line([[61, 36], [61, 38]]), line([[61.006, 36], [61.006, 38]])],
+    faces: [face(60.5, 37, "west", 55), face(61.003, 37, "middle", 55), face(61.5, 37, "east", 55)],
+  });
+  const snapshot = await readMapSnapshot(pool, { revision_id: revisionId, historical_jdn: year(948) });
+  const edge = snapshot?.boundaries.features.find(({ geometry }) => geometry.coordinates.every(([x]) => x === 61));
+  assert.ok(edge);
+  const edgeId = edge.properties.arc_id.split(":").at(-1);
+  const original = edge.geometry.coordinates;
+  const { rows } = await pool.query<{ topology_error: string }>(
+    "SELECT * FROM cartography.check_draft_spline($1, $2, $3)",
+    [revisionId, edgeId, JSON.stringify(line([original[0]!, [61.009, 37], original.at(-1)!]))],
+  );
+  assert.match(rows[0]?.topology_error ?? "", /non-boundary intersection/i);
+  assert.deepEqual(await readMapSnapshot(pool, { revision_id: revisionId, historical_jdn: year(948) }), snapshot);
 });

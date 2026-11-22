@@ -9,9 +9,13 @@ import type {
 } from "@historical-cartography/shared-schema";
 import { deriveSplinePreview } from "./spline-preview.ts";
 import type { ArcSplinePreview, ArcSplineRequest } from "./spline-preview.ts";
+import { checkSplineCandidate } from "./smoothing-gate.ts";
+import type { ArcSmoothingCheck, ArcSmoothingCheckRequest } from "./smoothing-gate.ts";
 
 export { migrateTopology } from "./migrate.ts";
 export type { ArcSplinePreview, ArcSplineRequest } from "./spline-preview.ts";
+export { registerLandmarkInventory } from "./smoothing-gate.ts";
+export type { ArcSmoothingCheck, ArcSmoothingCheckRequest, LandmarkAnchor } from "./smoothing-gate.ts";
 
 export interface DraftFaceSeed extends Omit<MapFaceProperties, "boundary_arc_ids"> {
   seed: Point;
@@ -76,15 +80,35 @@ export async function readMapSnapshot(pool: Pool, request: MapSnapshotRequest): 
 }
 
 export async function previewSharedArcSmoothing(pool: Pool, request: ArcSplineRequest): Promise<ArcSplinePreview | null> {
-  const snapshot = await readMapSnapshot(pool, request);
-  const boundary = snapshot?.boundaries.features.find(({ properties }) => properties.arc_id === request.arc_id);
-  if (!boundary) return null;
-  if (boundary.properties.snapped_paleo_feature_id !== undefined) {
+  const edgeId = nativeEdgeId(request);
+  if (!edgeId) return null;
+  if (!Number.isFinite(request.historical_jdn)) throw new RangeError("historical_jdn must be finite");
+  const { rows } = await pool.query<{ arc: { geometry: LineString; paleo: boolean } | null }>(
+    "SELECT cartography.read_native_arc($1, $2, $3) AS arc",
+    [request.revision_id, request.historical_jdn, edgeId],
+  );
+  const arc = rows[0]?.arc;
+  if (!arc) return null;
+  if (arc.paleo) {
     return {
       status: "NATURAL_REFERENCE",
-      canonical_geometry: boundary.geometry,
-      rendered_spline_geometry: boundary.geometry,
+      canonical_geometry: arc.geometry,
+      rendered_spline_geometry: arc.geometry,
     };
   }
-  return deriveSplinePreview(pool, boundary.geometry, request);
+  return deriveSplinePreview(pool, arc.geometry, request);
+}
+
+export async function checkSharedArcSmoothing(pool: Pool, request: ArcSmoothingCheckRequest): Promise<ArcSmoothingCheck | null> {
+  const edgeId = nativeEdgeId(request);
+  if (!edgeId) return null;
+  const preview = await previewSharedArcSmoothing(pool, request);
+  return preview ? checkSplineCandidate(pool, edgeId, preview, request) : null;
+}
+
+function nativeEdgeId(request: ArcSplineRequest): string | undefined {
+  const prefix = `${request.revision_id.toLowerCase()}:arc:`;
+  if (!request.arc_id.startsWith(prefix)) return undefined;
+  const id = request.arc_id.slice(prefix.length);
+  return /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9_223_372_036_854_775_807n ? id : undefined;
 }
