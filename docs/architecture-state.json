@@ -30,11 +30,13 @@
       "remaining": ["分纪元 PostGIS 拓扑", "共享弧段与平滑", "变更事务与门禁", "928 年黄金测试"]
     },
     "scholar-agent": {
-      "owner": "后端 AI 2",
+      "owner": "WorkBuddy 6.2 Astra",
       "phase": 2,
-      "status": "planned",
-      "implemented": [],
-      "remaining": ["检索和导入", "OCR 页行索引", "信源分级", "引文核验与事件接口", "文献 MCP"]
+      "status": "in_progress",
+      "branch": "backend/scholar",
+      "implemented": ["Internet Archive、Crossref、显式本地文件清单检索", "真实英文图注 OCR、页行与 BBox、原生文本索引", "按原件和索引修订核验引文", "SQLite 事件登记和 EventEvidenceReader（拒绝过期版本、错引和自动解除 T1 分歧）", "受信编目分级、脚注图遍历及五维研究候选；分歧保留双方引文与修订", "stdio 五项文献工具（配置白名单、编目及事件数据库后启用全套）"],
+      "evidence_paths": ["packages/scholar-agent/fixtures/search-live.json", "packages/scholar-agent/fixtures/ocr-live.json", "packages/scholar-agent/fixtures/voyage-source.json", "packages/scholar-agent/test"],
+      "remaining": ["中文竖排、横排和多语论文真实样本；旋转旧图验收", "真实脚注自动提取与五维史学样本；人工裁决版本闭环", "跨进程持久索引恢复与稳定 RPC 联调", "与 topo-core 联验 A-13、A-23、A-40；G3 未联合签收"]
     },
     "carto-studio-web": {
       "owner": "Gemini",
@@ -53,6 +55,15 @@
     }
   },
   "latest_verification": [
+    {
+      "command": "npm run check",
+      "date": "2026-11-22",
+      "source": "backend/scholar 分支，集成前",
+      "environment": "Windows / Node 22.22.2 / Tesseract 5.4.0（eng、osd）",
+      "result": "PASS",
+      "summary": "类型检查及 21 项测试通过，0 跳过。含真实达尔文转录本和实际英文图像 OCR；缺语种、合成脚注和合成争议不是史学验收。",
+      "acceptance": "包级工作切片，非 A-20 至 A-23 整体签收；未接入空间事务。"
+    },
     {
       "command": "npm ci --prefer-offline --no-audit --no-fund && npm run check",
       "date": "2026-11-22",
@@ -95,8 +106,8 @@
   ],
   "next_tasks": [
     {"task_id": "C-01", "owner": "Codex"},
-    {"task_id": "S-01", "owner": "后端 AI 2"},
-    {"task_id": "S-02", "owner": "后端 AI 2"},
+    {"task_id": "S-01", "owner": "WorkBuddy 6.2 Astra"},
+    {"task_id": "S-02", "owner": "WorkBuddy 6.2 Astra"},
     {"task_id": "F-01", "owner": "Gemini"}
   ]
 }

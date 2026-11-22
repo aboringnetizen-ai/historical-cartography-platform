@@ -1,0 +1,73 @@
+{
+  "observed_at": "2026-11-22T06:59:24.399Z",
+  "platform": "win32 10.0.19045 x64",
+  "node": "v22.22.2",
+  "tesseract": {
+    "executable": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+    "version": "tesseract v5.4.0.20240606",
+    "languages": [
+      "eng",
+      "osd"
+    ]
+  },
+  "source": "ocr-caption.png：工程自绘拉丁字母与数字笔画，无外部字体、图像或历史文献。样本按 CC0 提供。",
+  "input_sha256": "e78765dcb53348fa3ed44c86ae0e0b2636a65022897bf107922c89d77de1f925",
+  "sidecar": "ocr-caption.json",
+  "sidecar_sha256": "af06ce9ac6c0ff0e9abd3400cefcce98b7d1366b38e3b99af7e494d4f4b270d7",
+  "reference": [
+    "PLATE 12",
+    "SCALE 100"
+  ],
+  "exact_match": true,
+  "other_route_probes": [
+    {
+      "route": "vertical-classic",
+      "blocked": "缺少 Tesseract 语言模型：chi_tra_vert"
+    },
+    {
+      "route": "horizontal-edition",
+      "blocked": "缺少 Tesseract 语言模型：chi_sim"
+    },
+    {
+      "route": "multilingual-paper",
+      "blocked": "缺少 Tesseract 语言模型：deu"
+    }
+  ],
+  "acceptance": "单张英文稀疏图注的工程实测，不代表 A-21 全量通过。",
+  "result": {
+    "source_sha256": "e78765dcb53348fa3ed44c86ae0e0b2636a65022897bf107922c89d77de1f925",
+    "engine": "tesseract v5.4.0.20240606; map-caption; lang=eng; psm=11",
+    "pages": [
+      {
+        "file_page": 1,
+        "printed_page": "12",
+        "width": 620,
+        "height": 240,
+        "lines": [
+          {
+            "line_number": 1,
+            "text": "PLATE 12",
+            "bbox": [
+              38,
+              33,
+              458,
+              86
+            ],
+            "confidence": 0.95591026
+          },
+          {
+            "line_number": 2,
+            "text": "SCALE 100",
+            "bbox": [
+              38,
+              143,
+              513,
+              196
+            ],
+            "confidence": 0.9556928299999999
+          }
+        ]
+      }
+    ]
+  }
+}

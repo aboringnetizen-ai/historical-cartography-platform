@@ -1,0 +1,5 @@
+{
+  "notice": "合成书目，仅供离线测试，不是史料或真实 DOI 记录。",
+  "archive": {"response":{"docs":[{"identifier":"fixture-only","title":"合成 Dunhuang 写本","subject":["medieval"],"external-identifier":["doi:10.9999/FIXTURE"],"creator":"合成作者"}]}},
+  "crossref": {"message":{"items":[{"DOI":"10.9999/fixture","title":["合成 medieval Dunhuang manuscripts"],"author":[{"given":"样本","family":"甲"}],"published":{"date-parts":[[2001]]}},{"DOI":"10.9999/other","title":["合成弱相关 manuscripts"]},{"title":["无法定位的合成记录"]}]}}
+}

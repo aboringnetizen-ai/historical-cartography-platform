@@ -1,0 +1,9 @@
+{
+  "name": "@historical-cartography/scholar-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {"./events": "./src/events.ts", "./evidence": "./src/evidence.ts", "./search": "./src/search.ts", "./candidates": "./src/candidates.ts"},
+  "scripts": {"mcp": "node src/mcp.ts"},
+  "dependencies": {"@historical-cartography/shared-schema": "4.0.0"}
+}
