@@ -14,6 +14,23 @@ import type {
   MarchingRoute,
 } from "./demo-types.ts";
 import type { FeatureCollection, LineString } from "geojson";
+import {
+  EXTRA_CITATIONS,
+  EXTRA_EVENTS,
+  EXTRA_FIGURES,
+  EXTRA_POLITIES,
+  EXTRA_SOURCES,
+  EXTRA_TOPONYMS,
+} from "./demo-sources-events-extra.ts";
+
+export {
+  JDN_1300,
+  JDN_1301,
+  JDN_1672_DEC09,
+  JDN_1673,
+  JDN_1841,
+  JDN_1842,
+} from "./demo-sources-events-extra.ts";
 
 export const JDN_1BCE = createHistoricalTimestamp({ astronomical_year: 0 }).julian_day_number;
 export const JDN_1CE = createHistoricalTimestamp({ astronomical_year: 1 }).julian_day_number;
@@ -93,6 +110,7 @@ export const DEMO_SOURCES: SourceDocument[] = [
     source_url: "https://en.wikipedia.org/wiki/Ziyarid_dynasty",
     ocr_indexed: false,
   },
+  ...EXTRA_SOURCES,
 ];
 
 export const DEMO_CITATIONS: Record<string, EvidenceCitation> = {
@@ -178,6 +196,7 @@ export const DEMO_CITATIONS: Record<string, EvidenceCitation> = {
     translation_or_note: "公元前 1 年（哀帝元寿二年）接公元 1 年（平帝元始元年），西域都护府持续统辖诸国，验证无公元 0 年。",
     verified_by_human: true,
   },
+  ...EXTRA_CITATIONS,
 };
 
 export const DEMO_POLITIES: PolityMetadata[] = [
@@ -185,7 +204,7 @@ export const DEMO_POLITIES: PolityMetadata[] = [
     polity_id: "polity-abbasid",
     name_zh: "阿拔斯王朝",
     name_original_script: "الخلافة العباسية",
-    preferred_hex: "#4663c7",
+    preferred_hex: "#405fc7",
     monarch_name: "穆克塔迪尔",
     era_label: "908–932 CE",
     capital_toponym_id: "top-baghdad",
@@ -196,7 +215,7 @@ export const DEMO_POLITIES: PolityMetadata[] = [
     name_zh: "塔希尔王朝",
     name_original_script: "طاهریان",
     parent_polity_id: "polity-abbasid",
-    preferred_hex: "#3fa4c4",
+    preferred_hex: "#35a4cc",
     monarch_name: "阿卜杜拉·伊本·塔希尔",
     era_label: "821–873 CE",
     capital_toponym_id: "top-nishapur",
@@ -204,29 +223,29 @@ export const DEMO_POLITIES: PolityMetadata[] = [
   },
   {
     polity_id: "polity-samanid",
-    name_zh: "萨曼家族领地 / 萨曼王朝",
+    name_zh: "萨曼王朝",
     name_original_script: "سامانیان",
-    preferred_hex: "#3ca653",
+    preferred_hex: "#2dbd66",
     monarch_name: "纳斯尔二世 / 艾哈迈德一世",
     era_label: "819–999 CE",
     capital_toponym_id: "top-bukhara",
-    summary: "以布哈拉、撒马尔罕与拔汗那为核心的河中波斯文化王朝。",
+    summary: "以布哈拉、撒马尔罕与呼罗珊为核心的河中波斯文化王朝。",
   },
   {
     polity_id: "polity-khwarazm",
     name_zh: "花剌子模",
     name_original_script: "خوارزم",
     parent_polity_id: "polity-samanid",
-    preferred_hex: "#9e6fd1",
+    preferred_hex: "#9b5de5",
     monarch_name: "阿夫里格诸沙",
     era_label: "305–995 CE",
-    summary: "阿姆河下游绿洲王国，928 年臣属萨曼体系。",
+    summary: "阿姆河下游绿洲王国，咸海南岸核心。",
   },
   {
     polity_id: "polity-karluk",
     name_zh: "葛逻禄叶护国",
     name_original_script: "Qarluq Yabghuluq",
-    preferred_hex: "#d2498a",
+    preferred_hex: "#d44d8f",
     monarch_name: "葛逻禄叶护",
     era_label: "766–940 CE",
     summary: "七河流域与伊犁-楚河游牧政权。",
@@ -236,7 +255,7 @@ export const DEMO_POLITIES: PolityMetadata[] = [
     name_zh: "齐亚尔王朝",
     name_original_script: "آل زیار",
     parent_polity_id: "polity-abbasid",
-    preferred_hex: "#e38b2c",
+    preferred_hex: "#ebaa44",
     monarch_name: "马尔达维季（928 起兵）",
     era_label: "928–1090 CE",
     capital_toponym_id: "top-rayy",
@@ -247,7 +266,7 @@ export const DEMO_POLITIES: PolityMetadata[] = [
     name_zh: "喀喇汗国",
     name_original_script: "قراخانیان",
     parent_polity_id: "polity-karluk",
-    preferred_hex: "#b5548b",
+    preferred_hex: "#d84d95",
     monarch_name: "巴孜尔·阿尔斯兰汗",
     era_label: "840–1212 CE",
     summary: "继承葛逻禄体系并向怛罗斯与喀什噶尔扩展。",
@@ -271,6 +290,7 @@ export const DEMO_POLITIES: PolityMetadata[] = [
     era_label: "209 BCE – 48 CE",
     summary: "漠北游牧汗庭及天山北麓羁縻控制带。",
   },
+  ...EXTRA_POLITIES,
 ];
 
 export const DEMO_EVENTS: HistoricalEvent[] = [
@@ -356,6 +376,7 @@ export const DEMO_EVENTS: HistoricalEvent[] = [
     highest_credibility_tier: "T1_PRIMARY_AND_LOCAL_ACADEMIC",
     conflict_status: "CONSENSUS",
   },
+  ...EXTRA_EVENTS,
 ];
 
 export const DEMO_ADMIN_UNITS: AdminUnit[] = [
@@ -533,6 +554,7 @@ export const DEMO_TOPONYMS: HistoricalToponym[] = [
     label_priority: 95,
     citations: [DEMO_CITATIONS["cit-1bce-hanshu"]!],
   },
+  ...EXTRA_TOPONYMS,
 ];
 
 export const DEMO_FIGURES: HistoricalFigure[] = [
@@ -543,7 +565,7 @@ export const DEMO_FIGURES: HistoricalFigure[] = [
     polity_id: "polity-samanid",
     active_from_jdn: JDN_842,
     active_to_jdn: JDN_843,
-    coordinates: [68.2, 41.6],
+    coordinates: [68.2, 41.5],
     portrait_monogram: "艾",
     accent_hex: "#b7791f",
     summary: "842 年先后统合拔汗那、赭时与撒马尔罕。",
@@ -555,7 +577,7 @@ export const DEMO_FIGURES: HistoricalFigure[] = [
     polity_id: "polity-samanid",
     active_from_jdn: JDN_928_JAN,
     active_to_jdn: JDN_929,
-    coordinates: [64.42, 40.3],
+    coordinates: [65.2, 41.1],
     portrait_monogram: "纳",
     accent_hex: "#2f855a",
     summary: "萨曼王朝全盛君主，执掌布哈拉核心区与呼罗珊。",
@@ -563,15 +585,16 @@ export const DEMO_FIGURES: HistoricalFigure[] = [
   {
     figure_id: "fig-mardavij",
     name_zh: "马尔达维季",
-    title: "齐亚尔王朝奠基人",
+    title: "齐亚尔夺取雷伊",
     polity_id: "polity-ziyarid",
     active_from_jdn: JDN_928_AUG,
     active_to_jdn: JDN_929,
-    coordinates: [52.6, 36.2],
+    coordinates: [52.0, 36.7],
     portrait_monogram: "马",
-    accent_hex: "#dd6b20",
-    summary: "928 年率德莱木武装南下，夺取塔巴里斯坦与雷伊。",
+    accent_hex: "#d97706",
+    summary: "928 年率德莱木武装南下，攻占塔巴里斯坦与雷伊。",
   },
+  ...EXTRA_FIGURES,
 ];
 
 export const DEMO_PALEO_OVERLAYS: PaleoGeoOverlay[] = [

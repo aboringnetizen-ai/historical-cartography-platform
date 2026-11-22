@@ -75,6 +75,13 @@ export interface DynastyEraBand {
   color_hex: string;
 }
 
+export interface WaterBodyLabel {
+  id: string;
+  name_zh: string;
+  coordinates: [number, number];
+  kind: "SEA" | "LAKE";
+}
+
 export interface EpochSceneBundle {
   epoch: MapSnapshot["epoch"];
   epoch_label_zh: string;
@@ -83,6 +90,17 @@ export interface EpochSceneBundle {
   revision_id: string;
   data_status: MapSnapshot["data_status"];
   is_demo_fixture: boolean;
+  recommended_style_id?: string;
+  recommended_hud_types?: string[];
+  subtitle_default?: string;
+  chronicle_notes?: { heading: string; paragraphs: string[] };
+  coalition_sides?: Array<{
+    title_zh: string;
+    title_en: string;
+    accent_hex: string;
+    members: Array<{ name_zh: string; name_orig: string; commander?: string }>;
+  }>;
+  water_labels?: WaterBodyLabel[];
   canonical_arcs: SharedBoundaryArc[];
   canonical_faces: TerritorialFace[];
   snapshot: MapSnapshot;

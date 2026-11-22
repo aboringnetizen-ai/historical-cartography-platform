@@ -8,7 +8,7 @@ import type {
 } from "@historical-cartography/shared-schema";
 import { solvePolityPalette } from "../core/color/ciede2000.ts";
 import { DEMO_SCENE_BUNDLES, resolveSceneBundleByEpochId } from "../core/data/demo-dataset.ts";
-import { JDN_1BCE, JDN_928_AUG, JDN_929 } from "../core/data/demo-sources-events.ts";
+import { JDN_1842, JDN_1BCE, JDN_928_AUG } from "../core/data/demo-sources-events.ts";
 import type { EpochSceneBundle, HistoricalFigure } from "../core/data/demo-types.ts";
 import {
   buildDefaultHudWidgets,
@@ -83,13 +83,13 @@ export function StudioShell() {
 
   const [timelineViewport, setTimelineViewport] = useState<TimelineViewport>({
     min_jdn: JDN_1BCE - 365 * 20,
-    max_jdn: JDN_929 + 365 * 40,
+    max_jdn: JDN_1842 + 365 * 40,
     cursor_jdn: JDN_928_AUG,
     granularity: "CENTURY",
   });
 
-  const [showStylePanel, setShowStylePanel] = useState<boolean>(true);
-  const [showEvidencePanel, setShowEvidencePanel] = useState<boolean>(true);
+  const [showStylePanel, setShowStylePanel] = useState<boolean>(false);
+  const [showEvidencePanel, setShowEvidencePanel] = useState<boolean>(false);
   const [diffPreviewMode, setDiffPreviewMode] = useState<"AFTER" | "BEFORE">("AFTER");
   const [showGhostBorder, setShowGhostBorder] = useState<boolean>(false);
   const [curtainMode, setCurtainMode] = useState<CurtainMode>("NONE");
@@ -114,13 +114,15 @@ export function StudioShell() {
   );
   const [hudWidgets, setHudWidgets] = useState<HudWidgetSpec[]>(() => buildDefaultHudWidgets(6));
   const [enabledHudTypes, setEnabledHudTypes] = useState<Set<string>>(
-    () => new Set(["DATE_ERA_BADGE", "SUBTITLE_BAR"]),
+    () => new Set(INITIAL_BUNDLE.recommended_hud_types ?? ["DATE_ERA_BADGE", "FIGURE_PORTRAIT_PIN", "SUBTITLE_BAR"]),
   );
   const [directorTimeSec, setDirectorTimeSec] = useState<number>(0);
 
   const [isRecording60Hz, setIsRecording60Hz] = useState<boolean>(false);
   const telemetryRef = useRef<TelemetrySample[]>([]);
   const awaitIdleRef = useRef<(() => Promise<void>) | null>(null);
+  const liveProjectorRef = useRef<((lonLat: [number, number]) => [number, number]) | undefined>(undefined);
+  const [liveMoveTick, setLiveMoveTick] = useState<number>(0);
   const [telemetryCount, setTelemetryCount] = useState<number>(0);
 
   const [labelReport, setLabelReport] = useState<LabelLayoutReport>({
@@ -193,6 +195,14 @@ export function StudioShell() {
       setBundle(out.bundle);
       setDiffPreviewMode("AFTER");
       setSelectedEventId(out.bundle.events[0]?.hist_event_id);
+      if (out.bundle.recommended_style_id) {
+        setActiveStyleId(out.bundle.recommended_style_id);
+        setStylePatch({});
+        setPaletteThemeOverride(null);
+      }
+      if (out.bundle.recommended_hud_types) {
+        setEnabledHudTypes(new Set(out.bundle.recommended_hud_types));
+      }
       setCamera((prev) => ({
         ...prev,
         center: out.bundle!.default_camera.center,
@@ -398,6 +408,10 @@ export function StudioShell() {
               curtainRatio={curtainRatio}
               onCurtainRatioChange={setCurtainRatio}
               onCameraChange={setCamera}
+              onLiveProjectorReady={(fn) => {
+                liveProjectorRef.current = fn;
+              }}
+              onLiveFrameMove={setLiveMoveTick}
               onSelectFace={(faceId, polityId) => {
                 setSelectedFaceId(faceId);
                 setSelectedPolityId(polityId);
@@ -420,6 +434,8 @@ export function StudioShell() {
               enabledHudTypes={enabledHudTypes}
               showSafeGuides={showSafeGuides}
               polityColors={paletteReport.colors_by_polity}
+              {...(liveProjectorRef.current ? { projectCoord: liveProjectorRef.current } : {})}
+              liveMoveTick={liveMoveTick}
             />
           </div>
         </section>
@@ -472,7 +488,7 @@ export function StudioShell() {
           setTimelineViewport((prev) => ({
             ...prev,
             min_jdn: JDN_1BCE - 365 * 20,
-            max_jdn: JDN_929 + 365 * 40,
+            max_jdn: JDN_1842 + 365 * 40,
             granularity: "CENTURY",
           }))
         }

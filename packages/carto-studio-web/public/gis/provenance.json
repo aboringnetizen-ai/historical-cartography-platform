@@ -1,0 +1,57 @@
+{
+  "license": "Natural Earth Public Domain (https://www.naturalearthdata.com/about/terms-of-use/)",
+  "generated_at_iso": "2026-11-22T07:17:15.821Z",
+  "sources": [
+    {
+      "file": "ne_50m_ocean.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_ocean.geojson",
+      "sha256": "5b810162af4b20805838cfd766ef1a445c350cf6aafc8b589515daef30033adf"
+    },
+    {
+      "file": "ne_10m_lakes.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_lakes.geojson",
+      "sha256": "2d036f53dedec578001c5c30c2959ee7d4eebc1306900fa4367c49929ec8f2d9"
+    },
+    {
+      "file": "ne_10m_lakes_historic.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_lakes_historic.geojson",
+      "sha256": "43913ce0f5c18fe4d551d628b836af0da59ba193631767b5012a7f97b6a5b615"
+    },
+    {
+      "file": "ne_10m_rivers_lake_centerlines.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_rivers_lake_centerlines.geojson",
+      "sha256": "bb854a900ecbd3b408df46d5e16e3e0f974ba55993f9d8b5c26e855273c0905a"
+    },
+    {
+      "file": "ne_50m_admin_0_boundary_lines_land.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_boundary_lines_land.geojson",
+      "sha256": "2faac4f6b34386f3d21b6e018cf151f241f00e5c936d44dd17d7d9bfb147fa48"
+    }
+  ],
+  "outputs": [
+    {
+      "file": "ocean.geojson",
+      "feature_count": 1,
+      "bytes": 1021543,
+      "sha256": "4d472cf56086331889f95d2b99f4b7f0a72b392273ab6845a25ae67f904f10bf"
+    },
+    {
+      "file": "lakes.geojson",
+      "feature_count": 177,
+      "bytes": 537963,
+      "sha256": "67bf7c09d44fb2f55ba2429eb6920a5409b418d2cb3ede6cf4cadda99a1ac2f1"
+    },
+    {
+      "file": "rivers.geojson",
+      "feature_count": 551,
+      "bytes": 1971727,
+      "sha256": "0871118fab87ff0d86160ebc7c3cfe3952f865758ba8621986a78826d29f27d1"
+    },
+    {
+      "file": "modern_borders.geojson",
+      "feature_count": 390,
+      "bytes": 362986,
+      "sha256": "7a72bf3839b2995a5fe200ce61cf3ef379ec1e5ec8e7e841a94293d8de434f93"
+    }
+  ]
+}

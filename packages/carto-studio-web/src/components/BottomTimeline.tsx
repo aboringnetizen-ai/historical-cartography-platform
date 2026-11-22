@@ -202,7 +202,26 @@ export function BottomTimeline(props: BottomTimelineProps) {
                   {tick.label}
                 </div>
               ))}
-              <div className="timeline-cursor-line" style={{ left: `${(cursorRatio * 100).toFixed(2)}%` }} />
+              <div className="timeline-cursor-line" style={{ left: `${(cursorRatio * 100).toFixed(2)}%` }}>
+                <div
+                  style={{
+                    position: "absolute",
+                    top: -22,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                    background: "rgba(251, 191, 36, 0.95)",
+                    color: "#1e293b",
+                    fontSize: 11,
+                    fontWeight: 800,
+                    whiteSpace: "nowrap",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                  }}
+                >
+                  {formatJdnLabel(props.viewport.cursor_jdn, props.viewport.granularity)}
+                </div>
+              </div>
             </div>
           </div>
 

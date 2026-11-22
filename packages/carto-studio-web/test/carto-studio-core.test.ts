@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import { createHistoricalTimestamp } from "@historical-cartography/shared-schema";
 import { ciede2000, evaluateControlScoreVisuals, solvePolityPalette } from "../src/core/color/ciede2000.ts";
 import { DEMO_SCENE_BUNDLES, resolveSceneBundleByEpochId } from "../src/core/data/demo-dataset.ts";
-import { JDN_1BCE, JDN_1CE, JDN_842, JDN_928_AUG } from "../src/core/data/demo-sources-events.ts";
+import { JDN_1672_DEC09, JDN_1BCE, JDN_1CE, JDN_842, JDN_928_AUG } from "../src/core/data/demo-sources-events.ts";
 import {
   buildDefaultHudWidgets,
   classifyTopologyTransition,
@@ -18,7 +20,7 @@ import {
   zoomTimelineViewport,
   type TimelineViewport,
 } from "../src/core/director/timeline-math.ts";
-import { evaluateToponymLayout } from "../src/core/layout/label-collision.ts";
+import { evaluateToponymLayout, projectLonLatToScreen } from "../src/core/layout/label-collision.ts";
 import { DeterministicFrameBridge } from "../src/core/render/deterministic-bridge.ts";
 import { DemoSnapshotTransport, MapSnapshotClient } from "../src/core/services/snapshot-client.ts";
 import {
@@ -311,4 +313,37 @@ test("A-33, A-34, A-42: label collision detection, 60Hz telemetry smoothing, 9:1
     assert.equal(badFrame.accepted, false);
     assert.ok(badFrame.g5_gate.issues.some((i) => i.code === "FRAME_NOT_READY"));
   }
+});
+
+test("Real GIS assets, 1300/1672/1841 historical scenes, hour-level JDN, and continuous pan label projection", () => {
+  const gisDir = path.resolve(import.meta.dirname, "../public/gis");
+  for (const file of ["ocean.geojson", "lakes.geojson", "rivers.geojson", "modern_borders.geojson", "provenance.json"]) {
+    assert.ok(fs.existsSync(path.join(gisDir, file)), `Missing real GIS asset ${file}`);
+  }
+
+  const lakes = JSON.parse(fs.readFileSync(path.join(gisDir, "lakes.geojson"), "utf8")) as {
+    features: Array<{ properties: { name: string; name_zh?: string } }>;
+  };
+  assert.ok(lakes.features.some((f) => f.properties.name === "Aral Sea" && f.properties.name_zh === "咸海"));
+  assert.ok(lakes.features.some((f) => f.properties.name === "Issyk-Kul" && f.properties.name_zh === "伊塞克湖"));
+
+  assert.equal(DEMO_SCENE_BUNDLES.length, 7);
+  for (const id of ["epoch-1300-jochi-ulus", "epoch-1672-rampjaar", "epoch-1841-qing-atlas"]) {
+    const b = resolveSceneBundleByEpochId(id);
+    assert.ok(b, `Expected bundle ${id}`);
+    assert.ok(b.snapshot.territories.features.length >= 3);
+  }
+
+  const parts1672 = jdnToHistoricalParts(JDN_1672_DEC09);
+  assert.equal(parts1672.astronomical_year, 1672);
+  assert.equal(parts1672.month, 12);
+  assert.equal(parts1672.day, 9);
+  assert.equal(parts1672.hour, 20);
+  assert.equal(parts1672.minute, 0);
+
+  // Continuous drag projection updates coordinates linearly on tiny pan steps
+  const [x1, y1] = projectLonLatToScreen([64.42, 39.77], [62.2, 38.0], 4.35, 1280, 720);
+  const [x2, y2] = projectLonLatToScreen([64.42, 39.77], [63.2, 38.0], 4.35, 1280, 720);
+  assert.ok(x2 < x1, "Panning map camera east must shift city screen X left immediately");
+  assert.equal(Math.round(y1), Math.round(y2));
 });

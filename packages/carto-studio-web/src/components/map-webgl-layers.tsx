@@ -1,181 +1,170 @@
 import maplibregl from "maplibre-gl";
 import type { BasemapId, BorderShaderMode } from "@historical-cartography/shared-schema";
-import { BASEMAP_CATALOG } from "../core/styles/style-presets.ts";
 
-let protocolRegistered = false;
-
-function hash2d(x: number, y: number, seed: number): number {
-  const n = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453123;
-  return n - Math.floor(n);
+export interface RealBasemapRenderTheme {
+  tileUrl: string;
+  rasterSaturation: number;
+  rasterBrightnessMin: number;
+  rasterBrightnessMax: number;
+  rasterContrast: number;
+  rasterHueRotate: number;
+  rasterOpacity: number;
+  bgHex: string;
+  oceanFillHex: string;
+  shorelineHex: string;
+  riverHex: string;
+  hillshadeHighlightHex: string;
+  hillshadeShadowHex: string;
+  hillshadeExaggerationBoost: number;
+  reliefOverlayOpacity: number;
+  isDark: boolean;
 }
 
-function fbm(lon: number, lat: number, seed: number): number {
-  let value = 0;
-  let amp = 0.5;
-  let freq = 0.08;
-  for (let i = 0; i < 4; i++) {
-    const gx = Math.floor(lon * freq);
-    const gy = Math.floor(lat * freq);
-    const fx = lon * freq - gx;
-    const fy = lat * freq - gy;
-    const u = fx * fx * (3 - 2 * fx);
-    const v = fy * fy * (3 - 2 * fy);
-    const a = hash2d(gx, gy, seed + i);
-    const b = hash2d(gx + 1, gy, seed + i);
-    const c = hash2d(gx, gy + 1, seed + i);
-    const d = hash2d(gx + 1, gy + 1, seed + i);
-    const lerp1 = a + (b - a) * u;
-    const lerp2 = c + (d - c) * u;
-    value += (lerp1 + (lerp2 - lerp1) * v) * amp;
-    freq *= 2.05;
-    amp *= 0.5;
+export const AWS_TERRARIUM_DEM_TILES = [
+  "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+];
+
+export function getRealBasemapTheme(
+  basemapId: BasemapId,
+  desaturation: number,
+  hillshadeExaggeration: number,
+): RealBasemapRenderTheme {
+  const desat = Math.max(0, Math.min(1, desaturation));
+  switch (basemapId) {
+    case "hypsometric_dem":
+      return {
+        tileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}",
+        rasterSaturation: -desat * 0.45,
+        rasterBrightnessMin: 0.08,
+        rasterBrightnessMax: 0.96,
+        rasterContrast: 0.14,
+        rasterHueRotate: 0,
+        rasterOpacity: 0.95,
+        bgHex: "#d5dce6",
+        oceanFillHex: "#b7b8f0",
+        shorelineHex: "#ffffff",
+        riverHex: "#2563eb",
+        hillshadeHighlightHex: "#ffffff",
+        hillshadeShadowHex: "#182230",
+        hillshadeExaggerationBoost: Math.min(1, 0.55 + hillshadeExaggeration * 0.35),
+        reliefOverlayOpacity: 0.72,
+        isDark: false,
+      };
+    case "swiss_relief_engraved":
+      return {
+        tileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}",
+        rasterSaturation: -Math.max(0.25, desat),
+        rasterBrightnessMin: 0.12,
+        rasterBrightnessMax: 0.98,
+        rasterContrast: 0.18,
+        rasterHueRotate: 0,
+        rasterOpacity: 0.92,
+        bgHex: "#dfe5ea",
+        oceanFillHex: "#c2dbf2",
+        shorelineHex: "#334155",
+        riverHex: "#3b76b8",
+        hillshadeHighlightHex: "#fffbeb",
+        hillshadeShadowHex: "#334155",
+        hillshadeExaggerationBoost: Math.min(1, 0.6 + hillshadeExaggeration * 0.35),
+        reliefOverlayOpacity: 0.65,
+        isDark: false,
+      };
+    case "alabaster_clay_relief":
+      return {
+        tileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}",
+        rasterSaturation: -1,
+        rasterBrightnessMin: 0.32,
+        rasterBrightnessMax: 1.0,
+        rasterContrast: 0.22,
+        rasterHueRotate: 0,
+        rasterOpacity: 0.96,
+        bgHex: "#f1f3f5",
+        oceanFillHex: "#c0bded",
+        shorelineHex: "#ffffff",
+        riverHex: "#3b82f6",
+        hillshadeHighlightHex: "#ffffff",
+        hillshadeShadowHex: "#3b4252",
+        hillshadeExaggerationBoost: Math.min(1, 0.65 + hillshadeExaggeration * 0.35),
+        reliefOverlayOpacity: 0.75,
+        isDark: false,
+      };
+    case "satellite_natural":
+      return {
+        tileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        rasterSaturation: -desat * 0.4,
+        rasterBrightnessMin: 0.0,
+        rasterBrightnessMax: 0.95,
+        rasterContrast: 0.08,
+        rasterHueRotate: 0,
+        rasterOpacity: 0.95,
+        bgHex: "#182433",
+        oceanFillHex: "#1c334d",
+        shorelineHex: "#e2e8f0",
+        riverHex: "#60a5fa",
+        hillshadeHighlightHex: "#f8fafc",
+        hillshadeShadowHex: "#0f172a",
+        hillshadeExaggerationBoost: Math.min(1, 0.45 + hillshadeExaggeration * 0.3),
+        reliefOverlayOpacity: 0.45,
+        isDark: true,
+      };
+    case "satellite_dark_mono":
+      return {
+        tileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        rasterSaturation: -1,
+        rasterBrightnessMin: 0.0,
+        rasterBrightnessMax: 0.36,
+        rasterContrast: 0.25,
+        rasterHueRotate: 0,
+        rasterOpacity: 0.98,
+        bgHex: "#15181e",
+        oceanFillHex: "#1d2430",
+        shorelineHex: "#f8fafc",
+        riverHex: "#64748b",
+        hillshadeHighlightHex: "#64748b",
+        hillshadeShadowHex: "#090d14",
+        hillshadeExaggerationBoost: Math.min(1, 0.5 + hillshadeExaggeration * 0.35),
+        reliefOverlayOpacity: 0.55,
+        isDark: true,
+      };
+    case "antique_parchment":
+      return {
+        tileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}",
+        rasterSaturation: -0.78,
+        rasterBrightnessMin: 0.22,
+        rasterBrightnessMax: 0.92,
+        rasterContrast: 0.12,
+        rasterHueRotate: 25,
+        rasterOpacity: 0.58,
+        bgHex: "#e6dcc2",
+        oceanFillHex: "#cbd7d9",
+        shorelineHex: "#5c4d3c",
+        riverHex: "#3e699c",
+        hillshadeHighlightHex: "#fef9ec",
+        hillshadeShadowHex: "#6b5a44",
+        hillshadeExaggerationBoost: Math.min(1, 0.42 + hillshadeExaggeration * 0.3),
+        reliefOverlayOpacity: 0.48,
+        isDark: false,
+      };
+    case "modern_reference":
+      return {
+        tileUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}",
+        rasterSaturation: -Math.max(0.35, desat),
+        rasterBrightnessMin: 0.14,
+        rasterBrightnessMax: 0.98,
+        rasterContrast: 0.1,
+        rasterHueRotate: 0,
+        rasterOpacity: 0.85,
+        bgHex: "#e5ecf2",
+        oceanFillHex: "#bdd8f1",
+        shorelineHex: "#475569",
+        riverHex: "#3b82f6",
+        hillshadeHighlightHex: "#ffffff",
+        hillshadeShadowHex: "#475569",
+        hillshadeExaggerationBoost: Math.min(1, 0.35 + hillshadeExaggeration * 0.25),
+        reliefOverlayOpacity: 0.4,
+        isDark: false,
+      };
   }
-  return value;
-}
-
-function hexToRgbTuple(hex: string): [number, number, number] {
-  const c = hex.replace("#", "");
-  return [
-    Number.parseInt(c.slice(0, 2), 16) || 0,
-    Number.parseInt(c.slice(2, 4), 16) || 0,
-    Number.parseInt(c.slice(4, 6), 16) || 0,
-  ];
-}
-
-function tileToLonLat(z: number, x: number, y: number): { lon: number; lat: number } {
-  const n = 2 ** z;
-  const lon = (x / n) * 360 - 180;
-  const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n)));
-  const lat = (latRad * 180) / Math.PI;
-  return { lon, lat };
-}
-
-/**
- * Coarse historical Eurasia/Central Asia sea-vs-land mask so offline procedural tiles
- * cleanly depict Caspian Sea, Aral Sea, Persian Gulf, Mediterranean & Black Sea.
- */
-function isWaterMask(lon: number, lat: number): boolean {
-  // Caspian Sea approx
-  if (lon >= 46.8 && lon <= 54.0 && lat >= 36.6 && lat <= 46.5) {
-    const centerLon = 50.3 + Math.sin((lat - 37) * 0.45) * 1.1;
-    if (Math.abs(lon - centerLon) < 1.85) return true;
-  }
-  // Aral Sea approx
-  if (lon >= 58.3 && lon <= 61.6 && lat >= 43.4 && lat <= 46.4) return true;
-  // Persian Gulf / Indian Ocean south of 27.5
-  if (lat < 26.8 && lon >= 48 && lon <= 66) return true;
-  // Black Sea
-  if (lon >= 28 && lon <= 41.8 && lat >= 41.0 && lat <= 46.4) return true;
-  // Mediterranean
-  if (lon >= -5 && lon <= 36.2 && lat >= 31.2 && lat <= 38.5) return true;
-  return false;
-}
-
-async function renderProceduralTile(basemapId: BasemapId, z: number, x: number, y: number): Promise<Uint8Array> {
-  const size = 256;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return new Uint8Array();
-
-  const meta = BASEMAP_CATALOG.find((item) => item.id === basemapId) ?? BASEMAP_CATALOG[0]!;
-  const waterRgb = hexToRgbTuple(meta.water_hex);
-  const lowRgb = hexToRgbTuple(meta.land_low_hex);
-  const highRgb = hexToRgbTuple(meta.land_high_hex);
-
-  const img = ctx.createImageData(size, size);
-  const data = img.data;
-  const step = 4; // 4x4 microblock sampling keeps deterministic tile generation instant (<4ms)
-
-  for (let py = 0; py < size; py += step) {
-    const ty = y + py / size;
-    for (let px = 0; px < size; px += step) {
-      const tx = x + px / size;
-      const { lon, lat } = tileToLonLat(z, tx, ty);
-      const water = isWaterMask(lon, lat);
-
-      let r: number;
-      let g: number;
-      let b: number;
-
-      if (water) {
-        const wave = (fbm(lon * 2.1, lat * 2.1, 17) - 0.5) * 12;
-        r = waterRgb[0] + wave;
-        g = waterRgb[1] + wave;
-        b = waterRgb[2] + wave;
-      } else {
-        // Synthetic Kopet Dag, Pamir/Tian Shan & Zagros elevation ridges
-        const pamir = Math.exp(-(((lon - 73) / 7.5) ** 2 + ((lat - 38.5) / 5.5) ** 2)) * 0.72;
-        const zagros = Math.exp(-(((lon - 50) / 5.5) ** 2 + ((lat - 33) / 5.0) ** 2)) * 0.46;
-        const elev = Math.max(0, Math.min(1, fbm(lon, lat, 3) * 0.65 + pamir + zagros));
-        const elevDx = fbm(lon + 0.15, lat, 3) - fbm(lon - 0.15, lat, 3);
-        const elevDy = fbm(lon, lat + 0.15, 3) - fbm(lon, lat - 0.15, 3);
-        const hillshade = (elevDx * -0.7 + elevDy * 0.7) * 85;
-
-        r = lowRgb[0] + (highRgb[0] - lowRgb[0]) * elev + hillshade;
-        g = lowRgb[1] + (highRgb[1] - lowRgb[1]) * elev + hillshade;
-        b = lowRgb[2] + (highRgb[2] - lowRgb[2]) * elev + hillshade * (basemapId === "swiss_relief_engraved" ? 0.65 : 1);
-
-        if (basemapId === "antique_parchment") {
-          const grain = (hash2d(px, py, 91) - 0.5) * 14;
-          r += grain;
-          g += grain * 0.9;
-          b += grain * 0.6;
-        }
-      }
-
-      const cr = Math.max(0, Math.min(255, Math.round(r)));
-      const cg = Math.max(0, Math.min(255, Math.round(g)));
-      const cb = Math.max(0, Math.min(255, Math.round(b)));
-
-      for (let dy = 0; dy < step; dy++) {
-        for (let dx = 0; dx < step; dx++) {
-          const idx = ((py + dy) * size + (px + dx)) * 4;
-          data[idx] = cr;
-          data[idx + 1] = cg;
-          data[idx + 2] = cb;
-          data[idx + 3] = 255;
-        }
-      }
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-
-  if (basemapId === "satellite_dark_mono") {
-    ctx.strokeStyle = "rgba(248, 250, 252, 0.35)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0, 0, size, size);
-  }
-  if (basemapId === "modern_reference") {
-    ctx.strokeStyle = "rgba(100, 116, 139, 0.24)";
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(0, size / 2);
-    ctx.lineTo(size, size / 2);
-    ctx.moveTo(size / 2, 0);
-    ctx.lineTo(size / 2, size);
-    ctx.stroke();
-  }
-
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) return new Uint8Array();
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
-export function ensureCartoBasemapProtocol(): void {
-  if (protocolRegistered) return;
-  protocolRegistered = true;
-  maplibregl.addProtocol("carto-basemap", async (params) => {
-    const clean = params.url.replace("carto-basemap://", "");
-    const parts = clean.split("/");
-    const basemapId = (parts[0] || "hypsometric_dem") as BasemapId;
-    const z = Number.parseInt(parts[1] || "0", 10) || 0;
-    const x = Number.parseInt(parts[2] || "0", 10) || 0;
-    const y = Number.parseInt(parts[3] || "0", 10) || 0;
-    const bytes = await renderProceduralTile(basemapId, z, x, y);
-    return { data: bytes.buffer as ArrayBuffer };
-  });
 }
 
 export interface BorderShaderRingBuffer {
@@ -184,9 +173,9 @@ export interface BorderShaderRingBuffer {
 }
 
 /**
- * Custom WebGL layer implementing SDF-style inward band glow (`inner_band_glow`),
- * watercolor feathering (`watercolor_vignette`), and diagonal military occupation hatch
- * (`occupation_hatch_frontline`) directly inside MapLibre's WebGL render pass.
+ * Custom WebGL layer implementing inward band glow (`inner_band_glow`),
+ * antique watercolor perimeter vignette (`watercolor_vignette`), and crisp diagonal
+ * occupation hatch (`occupation_hatch_frontline`) inside MapLibre's WebGL pass.
  */
 export class BorderShaderWebGLLayer implements maplibregl.CustomLayerInterface {
   readonly id = "carto-border-shader-webgl";
@@ -241,15 +230,16 @@ export class BorderShaderWebGLLayer implements maplibregl.CustomLayerInterface {
       void main() {
         if (u_mode == 1) {
           float glow = clamp(1.0 - v_edge_dist, 0.0, 1.0);
-          gl_FragColor = vec4(u_color, u_opacity * pow(glow, 1.35));
+          gl_FragColor = vec4(u_color, u_opacity * pow(glow, 1.45));
         } else if (u_mode == 2) {
           float feather = smoothstep(0.0, 1.0, 1.0 - v_edge_dist);
-          gl_FragColor = vec4(u_color, u_opacity * feather * 0.85);
+          vec3 edgeTint = mix(u_color * 0.72, u_color, feather);
+          gl_FragColor = vec4(edgeTint, u_opacity * pow(feather, 1.15) * 0.92);
         } else if (u_mode == 4) {
           float rad = radians(u_hatch_angle);
           float proj = gl_FragCoord.x * cos(rad) + gl_FragCoord.y * sin(rad);
-          float stripe = step(0.58, fract(proj / 9.0));
-          gl_FragColor = vec4(u_color, u_opacity * (0.14 + 0.55 * stripe));
+          float stripe = step(0.54, fract(proj / 8.0));
+          gl_FragColor = vec4(u_color, u_opacity * (0.12 + 0.64 * stripe));
         } else {
           gl_FragColor = vec4(u_color, 0.0);
         }
@@ -319,7 +309,7 @@ export class BorderShaderWebGLLayer implements maplibregl.CustomLayerInterface {
     const aEdgeDist = gl.getAttribLocation(this.program, "a_edge_dist");
 
     gl.uniformMatrix4fv(uMatrix, false, matrix);
-    gl.uniform1f(uOpacity, Math.max(0.05, Math.min(0.85, this.opacity * (this.bandWidthPx / 16))));
+    gl.uniform1f(uOpacity, Math.max(0.08, Math.min(0.88, this.opacity * (this.bandWidthPx / 15))));
     gl.uniform1i(uMode, modeCode);
     gl.uniform1f(uHatch, this.hatchAngleDeg);
 

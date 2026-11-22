@@ -5,7 +5,12 @@ import type {
   SpatialChangeSet,
   TerritorialFace,
 } from "@historical-cartography/shared-schema";
-import type { Position } from "geojson";
+import {
+  build1300JochiBundle,
+  build1672RampjaarBundle,
+  build1841QingBundle,
+  makeSharedArc,
+} from "./demo-dataset-extra.ts";
 import {
   DEMO_ADMIN_EVOLUTIONS,
   DEMO_ADMIN_UNITS,
@@ -27,52 +32,7 @@ import {
   MODERN_REFERENCE_OVERLAY,
 } from "./demo-sources-events.ts";
 import type { EpochSceneBundle } from "./demo-types.ts";
-import {
-  buildSnapshotFromSharedTopology,
-  deriveBoundedSplineGeometry,
-} from "./topology-builder.ts";
-
-function makeArc(params: {
-  arc_id: string;
-  epoch_id: string;
-  coordinates: Position[];
-  start_node_id: string;
-  end_node_id: string;
-  left_face_id: string;
-  right_face_id: string;
-  valid_from_jdn: number;
-  valid_to_jdn: number;
-  driven_by_event_ids: string[];
-  certainty?: SharedBoundaryArc["certainty"];
-  snapped_paleo_feature_id?: string;
-  human_locked_override?: boolean;
-}): SharedBoundaryArc {
-  const canonical_geometry = {
-    type: "LineString" as const,
-    coordinates: params.coordinates,
-  };
-  return {
-    arc_id: params.arc_id,
-    epoch_id: params.epoch_id,
-    canonical_geometry,
-    rendered_spline_geometry: deriveBoundedSplineGeometry(canonical_geometry, 0.55),
-    smoothness_profile_id: "profile-cartographic-natural",
-    measured_fractal_dim: 1.11,
-    measured_max_deviation_km: 12.4,
-    start_node_id: params.start_node_id,
-    end_node_id: params.end_node_id,
-    left_face_id: params.left_face_id,
-    right_face_id: params.right_face_id,
-    ...(params.snapped_paleo_feature_id !== undefined
-      ? { snapped_paleo_feature_id: params.snapped_paleo_feature_id }
-      : {}),
-    certainty: params.certainty ?? "CERTAIN_EXACT",
-    valid_from_jdn: params.valid_from_jdn,
-    valid_to_jdn: params.valid_to_jdn,
-    driven_by_event_ids: params.driven_by_event_ids,
-    human_locked_override: params.human_locked_override ?? false,
-  };
-}
+import { buildSnapshotFromSharedTopology } from "./topology-builder.ts";
 
 function build842Bundle(): EpochSceneBundle {
   const epochId = "epoch-842-samanid";
@@ -80,47 +40,47 @@ function build842Bundle(): EpochSceneBundle {
   const ev = ["event-842-samanid-consolidation"];
 
   const arcs: SharedBoundaryArc[] = [
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-abb-ext",
       epoch_id: epochId,
-      coordinates: [[59.8, 29.2], [54.0, 28.8], [47.0, 29.0], [46.5, 35.5], [47.0, 42.0], [50.2, 40.2], [50.8, 37.4], [53.8, 37.2]],
-      start_node_id: "n842-s",
-      end_node_id: "n842-casp",
+      coordinates: [[59.8, 28.0], [51.0, 28.0], [42.0, 29.0], [41.5, 39.5], [47.2, 42.8], [50.2, 40.2], [50.2, 37.8]],
+      start_node_id: "n842-sab",
+      end_node_id: "n842-cas-sw",
       left_face_id: "face-842-abbasid",
       right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_842,
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-abb-tah",
       epoch_id: epochId,
-      coordinates: [[53.8, 37.2], [55.0, 34.4], [57.6, 32.0], [59.8, 29.2]],
-      start_node_id: "n842-casp",
-      end_node_id: "n842-s",
+      coordinates: [[50.2, 37.8], [52.4, 36.8], [54.2, 34.4], [56.8, 31.6], [59.8, 28.0]],
+      start_node_id: "n842-cas-sw",
+      end_node_id: "n842-sab",
       left_face_id: "face-842-abbasid",
       right_face_id: "face-842-tahirid",
       valid_from_jdn: JDN_842,
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
-      arc_id: "arc-842-tah-ext-n",
+    makeSharedArc({
+      arc_id: "arc-842-tah-cas",
       epoch_id: epochId,
-      coordinates: [[53.8, 37.2], [54.8, 39.2], [57.2, 40.5]],
-      start_node_id: "n842-casp",
+      coordinates: [[50.2, 37.8], [52.2, 38.8], [54.4, 41.2]],
+      start_node_id: "n842-cas-sw",
       end_node_id: "n842-khw-w",
       left_face_id: "face-842-tahirid",
       right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_842,
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
-      certainty: "APPROXIMATE_FUZZY",
+      certainty: "NATURAL_FEATURE",
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-khw-ext",
       epoch_id: epochId,
-      coordinates: [[60.8, 43.8], [58.0, 43.6], [57.2, 40.5]],
+      coordinates: [[59.8, 45.2], [56.8, 44.2], [54.4, 41.2]],
       start_node_id: "n842-aral",
       end_node_id: "n842-khw-w",
       left_face_id: "face-842-khwarazm",
@@ -129,10 +89,10 @@ function build842Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-khw-tah",
       epoch_id: epochId,
-      coordinates: [[57.2, 40.5], [59.8, 39.8], [62.2, 41.2]],
+      coordinates: [[54.4, 41.2], [57.8, 40.6], [60.4, 40.1], [62.4, 40.9]],
       start_node_id: "n842-khw-w",
       end_node_id: "n842-oxus",
       left_face_id: "face-842-khwarazm",
@@ -143,10 +103,10 @@ function build842Bundle(): EpochSceneBundle {
       certainty: "NATURAL_FEATURE",
       snapped_paleo_feature_id: "paleo-amu-uzboy-928",
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-khw-sam",
       epoch_id: epochId,
-      coordinates: [[62.2, 41.2], [62.0, 42.6], [60.8, 43.8]],
+      coordinates: [[62.4, 40.9], [61.9, 43.1], [59.8, 45.2]],
       start_node_id: "n842-oxus",
       end_node_id: "n842-aral",
       left_face_id: "face-842-khwarazm",
@@ -155,10 +115,10 @@ function build842Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-tah-sam",
       epoch_id: epochId,
-      coordinates: [[62.2, 41.2], [63.8, 39.0], [66.0, 37.4], [67.8, 35.8]],
+      coordinates: [[62.4, 40.9], [64.8, 39.2], [66.6, 37.4], [68.4, 35.6]],
       start_node_id: "n842-oxus",
       end_node_id: "n842-hindu",
       left_face_id: "face-842-samanid",
@@ -169,22 +129,22 @@ function build842Bundle(): EpochSceneBundle {
       certainty: "NATURAL_FEATURE",
       snapped_paleo_feature_id: "paleo-amu-uzboy-928",
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-tah-ext-s",
       epoch_id: epochId,
-      coordinates: [[67.8, 35.8], [66.2, 32.5], [63.5, 31.0], [59.8, 29.2]],
+      coordinates: [[68.4, 35.6], [66.8, 31.8], [63.5, 29.5], [59.8, 28.0]],
       start_node_id: "n842-hindu",
-      end_node_id: "n842-s",
+      end_node_id: "n842-sab",
       left_face_id: "face-842-tahirid",
       right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_842,
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-sam-ext-n",
       epoch_id: epochId,
-      coordinates: [[60.8, 43.8], [65.2, 43.4], [69.5, 42.8]],
+      coordinates: [[59.8, 45.2], [64.8, 44.1], [70.4, 43.2]],
       start_node_id: "n842-aral",
       end_node_id: "n842-kar-n",
       left_face_id: "face-842-samanid",
@@ -193,10 +153,10 @@ function build842Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-sam-kar",
       epoch_id: epochId,
-      coordinates: [[69.5, 42.8], [71.8, 41.2], [71.2, 39.8], [70.2, 39.2]],
+      coordinates: [[70.4, 43.2], [72.8, 41.8], [73.4, 40.2], [72.2, 39.2]],
       start_node_id: "n842-kar-n",
       end_node_id: "n842-kar-s",
       left_face_id: "face-842-samanid",
@@ -205,10 +165,10 @@ function build842Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-sam-ext-s",
       epoch_id: epochId,
-      coordinates: [[70.2, 39.2], [69.0, 37.2], [67.8, 35.8]],
+      coordinates: [[72.2, 39.2], [70.6, 37.4], [68.4, 35.6]],
       start_node_id: "n842-kar-s",
       end_node_id: "n842-hindu",
       left_face_id: "face-842-samanid",
@@ -217,10 +177,10 @@ function build842Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-kar-ext",
       epoch_id: epochId,
-      coordinates: [[69.5, 42.8], [73.5, 44.6], [77.8, 43.8], [77.5, 39.6], [73.4, 38.6], [70.2, 39.2]],
+      coordinates: [[70.4, 43.2], [74.6, 45.2], [79.8, 44.6], [79.4, 39.8], [75.2, 38.6], [72.2, 39.2]],
       start_node_id: "n842-kar-n",
       end_node_id: "n842-kar-s",
       left_face_id: "face-842-karluk",
@@ -229,10 +189,10 @@ function build842Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_843,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-842-herat-loop",
       epoch_id: epochId,
-      coordinates: [[61.8, 35.2], [63.2, 35.2], [63.4, 33.8], [61.9, 33.7], [61.8, 35.2]],
+      coordinates: [[61.4, 35.4], [63.5, 35.4], [63.7, 33.4], [61.5, 33.4], [61.4, 35.4]],
       start_node_id: "n842-herat",
       end_node_id: "n842-herat",
       left_face_id: "face-842-herat",
@@ -261,7 +221,7 @@ function build842Bundle(): EpochSceneBundle {
     {
       face_id: "face-842-tahirid",
       epoch_id: epochId,
-      boundary_arc_ids: ["arc-842-tah-ext-n", "arc-842-khw-tah", "arc-842-tah-sam", "arc-842-tah-ext-s", "arc-842-abb-tah"],
+      boundary_arc_ids: ["arc-842-tah-cas", "arc-842-khw-tah", "arc-842-tah-sam", "arc-842-tah-ext-s", "arc-842-abb-tah"],
       zone_semantics: "POLITY_TERRITORY",
       polity_id: "polity-tahirid",
       control_score: 74,
@@ -343,11 +303,19 @@ function build842Bundle(): EpochSceneBundle {
   return {
     epoch,
     epoch_label_zh: "公元 842 年 · 萨曼家族河中统合",
-    historical_year_display: "公元842年",
+    historical_year_display: "公元 842 年",
     calendar_era_note: "唐武宗会昌二年 / 回历 227 年",
     revision_id: snapshot.revision_id,
     data_status: snapshot.data_status,
     is_demo_fixture: true,
+    recommended_style_id: "alabaster_clay_focus",
+    recommended_hud_types: ["DATE_ERA_BADGE", "FIGURE_PORTRAIT_PIN", "SUBTITLE_BAR"],
+    subtitle_default: "艾哈迈德一世相继统合拔汗那、赭时与撒马尔罕 奠定河中根基",
+    water_labels: [
+      { id: "water-caspian", name_zh: "里海", coordinates: [50.8, 41.8], kind: "SEA" },
+      { id: "water-aral", name_zh: "咸海", coordinates: [59.8, 45.1], kind: "LAKE" },
+      { id: "water-issyk", name_zh: "伊塞克湖", coordinates: [77.2, 42.45], kind: "LAKE" },
+    ],
     canonical_arcs: arcs,
     canonical_faces: faces,
     snapshot,
@@ -361,7 +329,7 @@ function build842Bundle(): EpochSceneBundle {
     paleo_overlays: DEMO_PALEO_OVERLAYS,
     marching_routes: [],
     polities: DEMO_POLITIES,
-    default_camera: { center: [62.5, 37.8], zoom: 4.5 },
+    default_camera: { center: [61.2, 38.2], zoom: 4.35 },
     modern_reference_overlay: MODERN_REFERENCE_OVERLAY,
   };
 }
@@ -373,11 +341,11 @@ function build928Bundle(): EpochSceneBundle {
   const evDispute = ["event-928-rayy-suzerainty-dispute"];
 
   const arcs: SharedBoundaryArc[] = [
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-abb-ext",
       epoch_id: epochId,
-      coordinates: [[55.5, 29.0], [47.0, 29.0], [47.0, 40.5], [49.4, 38.2]],
-      start_node_id: "n928-s1",
+      coordinates: [[54.8, 28.5], [45.0, 28.5], [44.0, 41.0], [49.8, 37.8]],
+      start_node_id: "n928-abb-s",
       end_node_id: "n928-cas-w",
       left_face_id: "face-928-abbasid",
       right_face_id: "EXTERIOR_WORLD",
@@ -385,10 +353,10 @@ function build928Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-abb-ziy",
       epoch_id: epochId,
-      coordinates: [[49.4, 38.2], [50.2, 37.3], [50.8, 36.6]],
+      coordinates: [[49.8, 37.8], [49.6, 37.1], [50.4, 36.2]],
       start_node_id: "n928-cas-w",
       end_node_id: "n928-z1",
       left_face_id: "face-928-abbasid",
@@ -397,10 +365,10 @@ function build928Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-abb-ray",
       epoch_id: epochId,
-      coordinates: [[50.8, 36.6], [50.5, 35.4], [52.6, 34.4]],
+      coordinates: [[50.4, 36.2], [50.8, 34.6], [52.8, 33.4]],
       start_node_id: "n928-z1",
       end_node_id: "n928-r1",
       left_face_id: "face-928-abbasid",
@@ -410,24 +378,24 @@ function build928Bundle(): EpochSceneBundle {
       driven_by_event_ids: evDispute,
       certainty: "DISPUTED_SCHOLARLY",
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-abb-kho",
       epoch_id: epochId,
-      coordinates: [[52.6, 34.4], [54.2, 31.8], [55.5, 29.0]],
+      coordinates: [[52.8, 33.4], [53.9, 31.2], [54.8, 28.5]],
       start_node_id: "n928-r1",
-      end_node_id: "n928-s1",
+      end_node_id: "n928-abb-s",
       left_face_id: "face-928-abbasid",
       right_face_id: "face-928-samanid-khorasan",
       valid_from_jdn: JDN_928_JAN,
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
     }),
-    makeArc({
-      arc_id: "arc-928-ziy-ext",
+    makeSharedArc({
+      arc_id: "arc-928-ziy-cas",
       epoch_id: epochId,
-      coordinates: [[49.4, 38.2], [51.8, 36.8], [53.9, 37.0], [54.4, 38.8]],
+      coordinates: [[49.8, 37.8], [51.1, 38.4], [52.2, 38.8]],
       start_node_id: "n928-cas-w",
-      end_node_id: "n928-cas-e",
+      end_node_id: "n928-cas-m",
       left_face_id: "face-928-ziyarid",
       right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_928_JAN,
@@ -435,11 +403,11 @@ function build928Bundle(): EpochSceneBundle {
       driven_by_event_ids: evMain,
       certainty: "NATURAL_FEATURE",
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-ziy-kho",
       epoch_id: epochId,
-      coordinates: [[54.4, 38.8], [55.6, 37.1], [54.6, 35.4]],
-      start_node_id: "n928-cas-e",
+      coordinates: [[52.2, 38.8], [54.8, 37.3], [55.4, 35.4]],
+      start_node_id: "n928-cas-m",
       end_node_id: "n928-z2",
       left_face_id: "face-928-ziyarid",
       right_face_id: "face-928-samanid-khorasan",
@@ -447,10 +415,10 @@ function build928Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-ziy-ray",
       epoch_id: epochId,
-      coordinates: [[54.6, 35.4], [52.9, 36.1], [50.8, 36.6]],
+      coordinates: [[55.4, 35.4], [53.2, 36.1], [50.4, 36.2]],
       start_node_id: "n928-z2",
       end_node_id: "n928-z1",
       left_face_id: "face-928-ziyarid",
@@ -460,10 +428,10 @@ function build928Bundle(): EpochSceneBundle {
       driven_by_event_ids: evDispute,
       certainty: "DISPUTED_SCHOLARLY",
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-ray-kho",
       epoch_id: epochId,
-      coordinates: [[52.6, 34.4], [53.8, 34.8], [54.6, 35.4]],
+      coordinates: [[52.8, 33.4], [54.3, 34.3], [55.4, 35.4]],
       start_node_id: "n928-r1",
       end_node_id: "n928-z2",
       left_face_id: "face-928-rayy-disputed",
@@ -473,25 +441,75 @@ function build928Bundle(): EpochSceneBundle {
       driven_by_event_ids: evDispute,
       certainty: "DISPUTED_SCHOLARLY",
     }),
-    makeArc({
-      arc_id: "arc-928-kho-ext-n",
+    makeSharedArc({
+      arc_id: "arc-928-ogh-ext",
       epoch_id: epochId,
-      coordinates: [[54.4, 38.8], [55.8, 39.8], [57.6, 40.3]],
-      start_node_id: "n928-cas-e",
-      end_node_id: "n928-des-w",
-      left_face_id: "face-928-samanid-khorasan",
+      coordinates: [[52.2, 38.8], [52.6, 44.0], [56.8, 46.4], [58.5, 45.2]],
+      start_node_id: "n928-cas-m",
+      end_node_id: "n928-aral-nw",
+      left_face_id: "face-928-oghuz",
       right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_928_JAN,
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
+      certainty: "APPROXIMATE_FUZZY",
     }),
-    makeArc({
-      arc_id: "arc-928-des-kho",
+    makeSharedArc({
+      arc_id: "arc-928-ogh-khw",
       epoch_id: epochId,
-      coordinates: [[57.6, 40.3], [60.6, 39.2], [63.2, 39.4]],
-      start_node_id: "n928-des-w",
-      end_node_id: "n928-des-e",
-      left_face_id: "face-928-samanid-kyzylkum",
+      coordinates: [[58.5, 45.2], [57.6, 43.2], [56.2, 41.2]],
+      start_node_id: "n928-aral-nw",
+      end_node_id: "n928-khw-w",
+      left_face_id: "face-928-oghuz",
+      right_face_id: "face-928-khwarazm",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      driven_by_event_ids: evMain,
+    }),
+    makeSharedArc({
+      arc_id: "arc-928-ogh-kho",
+      epoch_id: epochId,
+      coordinates: [[56.2, 41.2], [54.4, 40.1], [52.2, 38.8]],
+      start_node_id: "n928-khw-w",
+      end_node_id: "n928-cas-m",
+      left_face_id: "face-928-oghuz",
+      right_face_id: "face-928-samanid-khorasan",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      driven_by_event_ids: evMain,
+    }),
+    makeSharedArc({
+      arc_id: "arc-928-khw-aral",
+      epoch_id: epochId,
+      coordinates: [[58.5, 45.2], [61.8, 44.2]],
+      start_node_id: "n928-aral-nw",
+      end_node_id: "n928-khw-e",
+      left_face_id: "face-928-khwarazm",
+      right_face_id: "EXTERIOR_WORLD",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      driven_by_event_ids: evMain,
+      certainty: "NATURAL_FEATURE",
+    }),
+    makeSharedArc({
+      arc_id: "arc-928-khw-des",
+      epoch_id: epochId,
+      coordinates: [[61.8, 44.2], [61.2, 41.8], [62.6, 40.6]],
+      start_node_id: "n928-khw-e",
+      end_node_id: "n928-oxus",
+      left_face_id: "face-928-khwarazm",
+      right_face_id: "face-928-samanid-kyzylkum",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      driven_by_event_ids: evMain,
+    }),
+    makeSharedArc({
+      arc_id: "arc-928-khw-kho",
+      epoch_id: epochId,
+      coordinates: [[62.6, 40.6], [59.2, 40.2], [56.2, 41.2]],
+      start_node_id: "n928-oxus",
+      end_node_id: "n928-khw-w",
+      left_face_id: "face-928-khwarazm",
       right_face_id: "face-928-samanid-khorasan",
       valid_from_jdn: JDN_928_JAN,
       valid_to_jdn: JDN_929,
@@ -499,12 +517,37 @@ function build928Bundle(): EpochSceneBundle {
       certainty: "NATURAL_FEATURE",
       snapped_paleo_feature_id: "paleo-amu-uzboy-928",
     }),
-    makeArc({
+    makeSharedArc({
+      arc_id: "arc-928-des-ext",
+      epoch_id: epochId,
+      coordinates: [[61.8, 44.2], [63.2, 44.6], [64.4, 43.8]],
+      start_node_id: "n928-khw-e",
+      end_node_id: "n928-des-n",
+      left_face_id: "face-928-samanid-kyzylkum",
+      right_face_id: "EXTERIOR_WORLD",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      driven_by_event_ids: evMain,
+      certainty: "APPROXIMATE_FUZZY",
+    }),
+    makeSharedArc({
+      arc_id: "arc-928-des-core",
+      epoch_id: epochId,
+      coordinates: [[64.4, 43.8], [63.8, 41.5], [62.6, 40.6]],
+      start_node_id: "n928-des-n",
+      end_node_id: "n928-oxus",
+      left_face_id: "face-928-samanid-kyzylkum",
+      right_face_id: "face-928-samanid-core",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      driven_by_event_ids: evMain,
+    }),
+    makeSharedArc({
       arc_id: "arc-928-sam-kho",
       epoch_id: epochId,
-      coordinates: [[63.2, 39.4], [65.2, 37.8], [67.8, 36.2]],
-      start_node_id: "n928-des-e",
-      end_node_id: "n928-ox-s",
+      coordinates: [[62.6, 40.6], [65.2, 38.0], [68.8, 35.2]],
+      start_node_id: "n928-oxus",
+      end_node_id: "n928-hindu",
       left_face_id: "face-928-samanid-core",
       right_face_id: "face-928-samanid-khorasan",
       valid_from_jdn: JDN_928_JAN,
@@ -514,47 +557,70 @@ function build928Bundle(): EpochSceneBundle {
       snapped_paleo_feature_id: "paleo-amu-uzboy-928",
       human_locked_override: true,
     }),
-    makeArc({
+    makeSharedArc({
+      arc_id: "arc-928-kho-hin",
+      epoch_id: epochId,
+      coordinates: [[68.8, 35.2], [68.1, 33.9], [67.0, 33.0]],
+      start_node_id: "n928-hindu",
+      end_node_id: "n928-saf-e",
+      left_face_id: "face-928-samanid-khorasan",
+      right_face_id: "face-928-hindushahi",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      driven_by_event_ids: evMain,
+    }),
+    makeSharedArc({
+      arc_id: "arc-928-kho-saf",
+      epoch_id: epochId,
+      coordinates: [[67.0, 33.0], [64.2, 32.8], [61.2, 30.8]],
+      start_node_id: "n928-saf-e",
+      end_node_id: "n928-saf-w",
+      left_face_id: "face-928-samanid-khorasan",
+      right_face_id: "face-928-saffarid",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      driven_by_event_ids: evMain,
+    }),
+    makeSharedArc({
       arc_id: "arc-928-kho-ext-s",
       epoch_id: epochId,
-      coordinates: [[67.8, 36.2], [66.0, 32.2], [61.2, 30.0], [55.5, 29.0]],
-      start_node_id: "n928-ox-s",
-      end_node_id: "n928-s1",
+      coordinates: [[61.2, 30.8], [58.0, 29.5], [54.8, 28.5]],
+      start_node_id: "n928-saf-w",
+      end_node_id: "n928-abb-s",
       left_face_id: "face-928-samanid-khorasan",
       right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_928_JAN,
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
     }),
-    makeArc({
-      arc_id: "arc-928-des-ext",
+    makeSharedArc({
+      arc_id: "arc-928-saf-ext",
       epoch_id: epochId,
-      coordinates: [[57.6, 40.3], [58.4, 43.2], [61.6, 43.9], [64.4, 43.0]],
-      start_node_id: "n928-des-w",
-      end_node_id: "n928-des-n",
-      left_face_id: "face-928-samanid-kyzylkum",
+      coordinates: [[67.0, 33.0], [65.8, 30.2], [61.8, 29.4], [61.2, 30.8]],
+      start_node_id: "n928-saf-e",
+      end_node_id: "n928-saf-w",
+      left_face_id: "face-928-saffarid",
       right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_928_JAN,
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
-      certainty: "APPROXIMATE_FUZZY",
     }),
-    makeArc({
-      arc_id: "arc-928-des-core",
+    makeSharedArc({
+      arc_id: "arc-928-hin-ext",
       epoch_id: epochId,
-      coordinates: [[64.4, 43.0], [63.6, 41.2], [63.2, 39.4]],
-      start_node_id: "n928-des-n",
-      end_node_id: "n928-des-e",
-      left_face_id: "face-928-samanid-kyzylkum",
-      right_face_id: "face-928-samanid-core",
+      coordinates: [[68.8, 35.2], [72.2, 35.6], [73.4, 31.4], [69.0, 30.6], [67.0, 33.0]],
+      start_node_id: "n928-hindu",
+      end_node_id: "n928-saf-e",
+      left_face_id: "face-928-hindushahi",
+      right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_928_JAN,
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-core-ext-n",
       epoch_id: epochId,
-      coordinates: [[64.4, 43.0], [67.4, 43.4], [70.2, 42.6]],
+      coordinates: [[64.4, 43.8], [67.8, 44.1], [70.8, 43.8]],
       start_node_id: "n928-des-n",
       end_node_id: "n928-kar-n",
       left_face_id: "face-928-samanid-core",
@@ -563,10 +629,10 @@ function build928Bundle(): EpochSceneBundle {
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-sam-kar",
       epoch_id: epochId,
-      coordinates: [[70.2, 42.6], [72.2, 41.1], [71.8, 39.5], [70.0, 38.6]],
+      coordinates: [[70.8, 43.8], [73.4, 42.1], [73.9, 39.8], [73.4, 38.2]],
       start_node_id: "n928-kar-n",
       end_node_id: "n928-kar-s",
       left_face_id: "face-928-samanid-core",
@@ -576,22 +642,22 @@ function build928Bundle(): EpochSceneBundle {
       driven_by_event_ids: ["event-928-talas-t3-clue"],
       certainty: "APPROXIMATE_FUZZY",
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-core-ext-s",
       epoch_id: epochId,
-      coordinates: [[70.0, 38.6], [68.9, 37.2], [67.8, 36.2]],
+      coordinates: [[73.4, 38.2], [71.2, 36.6], [68.8, 35.2]],
       start_node_id: "n928-kar-s",
-      end_node_id: "n928-ox-s",
+      end_node_id: "n928-hindu",
       left_face_id: "face-928-samanid-core",
       right_face_id: "EXTERIOR_WORLD",
       valid_from_jdn: JDN_928_JAN,
       valid_to_jdn: JDN_929,
       driven_by_event_ids: evMain,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-928-kar-ext",
       epoch_id: epochId,
-      coordinates: [[70.2, 42.6], [74.4, 44.3], [78.6, 42.9], [78.2, 39.0], [73.6, 38.1], [70.0, 38.6]],
+      coordinates: [[70.8, 43.8], [75.8, 45.4], [81.6, 44.2], [81.2, 38.8], [76.5, 37.8], [73.4, 38.2]],
       start_node_id: "n928-kar-n",
       end_node_id: "n928-kar-s",
       left_face_id: "face-928-karakhanid",
@@ -621,7 +687,7 @@ function build928Bundle(): EpochSceneBundle {
     {
       face_id: "face-928-ziyarid",
       epoch_id: epochId,
-      boundary_arc_ids: ["arc-928-ziy-ext", "arc-928-ziy-kho", "arc-928-ziy-ray", "arc-928-abb-ziy"],
+      boundary_arc_ids: ["arc-928-ziy-cas", "arc-928-ziy-kho", "arc-928-ziy-ray", "arc-928-abb-ziy"],
       zone_semantics: "POLITY_TERRITORY",
       polity_id: "polity-ziyarid",
       admin_unit_id: "adm-rayy-frontier",
@@ -649,15 +715,45 @@ function build928Bundle(): EpochSceneBundle {
       human_locked_override: false,
     },
     {
+      face_id: "face-928-oghuz",
+      epoch_id: epochId,
+      boundary_arc_ids: ["arc-928-ogh-ext", "arc-928-ogh-khw", "arc-928-ogh-kho"],
+      zone_semantics: "POLITY_TERRITORY",
+      polity_id: "polity-oghuz",
+      control_score: 34,
+      control_semantic_tag: "LOOSE_OR_SPARSE_FRONTIER",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      highest_credibility_tier: "T1_PRIMARY_AND_LOCAL_ACADEMIC",
+      driven_by_event_ids: evMain,
+      human_locked_override: false,
+    },
+    {
+      face_id: "face-928-khwarazm",
+      epoch_id: epochId,
+      boundary_arc_ids: ["arc-928-khw-aral", "arc-928-khw-des", "arc-928-khw-kho", "arc-928-ogh-khw"],
+      zone_semantics: "POLITY_TERRITORY",
+      polity_id: "polity-khwarazm",
+      control_score: 62,
+      control_semantic_tag: "TRIBUTARY_VASSAL",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      highest_credibility_tier: "T1_PRIMARY_AND_LOCAL_ACADEMIC",
+      driven_by_event_ids: evMain,
+      human_locked_override: false,
+    },
+    {
       face_id: "face-928-samanid-khorasan",
       epoch_id: epochId,
       boundary_arc_ids: [
         "arc-928-abb-kho",
         "arc-928-ray-kho",
         "arc-928-ziy-kho",
-        "arc-928-kho-ext-n",
-        "arc-928-des-kho",
+        "arc-928-ogh-kho",
+        "arc-928-khw-kho",
         "arc-928-sam-kho",
+        "arc-928-kho-hin",
+        "arc-928-kho-saf",
         "arc-928-kho-ext-s",
       ],
       zone_semantics: "POLITY_TERRITORY",
@@ -674,7 +770,7 @@ function build928Bundle(): EpochSceneBundle {
     {
       face_id: "face-928-samanid-kyzylkum",
       epoch_id: epochId,
-      boundary_arc_ids: ["arc-928-des-ext", "arc-928-des-core", "arc-928-des-kho"],
+      boundary_arc_ids: ["arc-928-des-ext", "arc-928-des-core", "arc-928-khw-des"],
       zone_semantics: "POLITY_TERRITORY",
       polity_id: "polity-samanid",
       control_score: 14,
@@ -715,6 +811,34 @@ function build928Bundle(): EpochSceneBundle {
       driven_by_event_ids: ["event-928-talas-t3-clue"],
       human_locked_override: false,
     },
+    {
+      face_id: "face-928-saffarid",
+      epoch_id: epochId,
+      boundary_arc_ids: ["arc-928-saf-ext", "arc-928-kho-saf"],
+      zone_semantics: "POLITY_TERRITORY",
+      polity_id: "polity-saffarid",
+      control_score: 58,
+      control_semantic_tag: "REGULAR_ADMIN",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      highest_credibility_tier: "T1_PRIMARY_AND_LOCAL_ACADEMIC",
+      driven_by_event_ids: evMain,
+      human_locked_override: false,
+    },
+    {
+      face_id: "face-928-hindushahi",
+      epoch_id: epochId,
+      boundary_arc_ids: ["arc-928-hin-ext", "arc-928-kho-hin"],
+      zone_semantics: "POLITY_TERRITORY",
+      polity_id: "polity-hindushahi",
+      control_score: 70,
+      control_semantic_tag: "REGULAR_ADMIN",
+      valid_from_jdn: JDN_928_JAN,
+      valid_to_jdn: JDN_929,
+      highest_credibility_tier: "T1_PRIMARY_AND_LOCAL_ACADEMIC",
+      driven_by_event_ids: evMain,
+      human_locked_override: false,
+    },
   ];
 
   const beforeFaces: TerritorialFace[] = afterFaces.map((face) => {
@@ -730,29 +854,15 @@ function build928Bundle(): EpochSceneBundle {
     if (face.face_id === "face-928-ziyarid") {
       return {
         ...face,
-        polity_id: "polity-abbasid",
+        polity_id: "polity-samanid",
         control_score: 48,
       };
     }
     return face;
   });
 
-  const beforeSnapshot = buildSnapshotFromSharedTopology(
-    epoch,
-    "rev-928-before-001",
-    "COMMITTED",
-    arcs,
-    beforeFaces,
-    true,
-  );
-  const afterSnapshot = buildSnapshotFromSharedTopology(
-    epoch,
-    "rev-928-pending-002",
-    "DRAFT",
-    arcs,
-    afterFaces,
-    true,
-  );
+  const beforeSnapshot = buildSnapshotFromSharedTopology(epoch, "rev-928-before-001", "COMMITTED", arcs, beforeFaces);
+  const afterSnapshot = buildSnapshotFromSharedTopology(epoch, "rev-928-pending-002", "DRAFT", arcs, afterFaces);
 
   const changeset: SpatialChangeSet = {
     changeset_id: "cs-928-rayy-campaign",
@@ -779,12 +889,20 @@ function build928Bundle(): EpochSceneBundle {
 
   return {
     epoch,
-    epoch_label_zh: "公元 928 年 · 萨曼—齐亚尔（黄金场景）",
-    historical_year_display: "公元928年",
-    calendar_era_note: "后唐明宗天成三年 / 回历 316 年",
+    epoch_label_zh: "公元 928 年 · 中亚萨曼王朝（黄金场景）",
+    historical_year_display: "公元 928 年",
+    calendar_era_note: "中亚萨曼王朝 · 后唐天成三年",
     revision_id: afterSnapshot.revision_id,
     data_status: afterSnapshot.data_status,
     is_demo_fixture: true,
+    recommended_style_id: "vivid_video_songti",
+    recommended_hud_types: ["DATE_ERA_BADGE", "FIGURE_PORTRAIT_PIN", "SUBTITLE_BAR"],
+    subtitle_default: "攻占塔巴里斯坦与雷伊，迫使萨曼军东撤",
+    water_labels: [
+      { id: "water-caspian", name_zh: "里海", coordinates: [50.8, 41.8], kind: "SEA" },
+      { id: "water-aral", name_zh: "咸海", coordinates: [59.8, 45.1], kind: "LAKE" },
+      { id: "water-issyk", name_zh: "伊塞克湖", coordinates: [77.2, 42.45], kind: "LAKE" },
+    ],
     canonical_arcs: arcs,
     canonical_faces: afterFaces,
     snapshot: afterSnapshot,
@@ -800,13 +918,13 @@ function build928Bundle(): EpochSceneBundle {
     polities: DEMO_POLITIES,
     diff_record: {
       changeset,
-      summary_zh: "928 年雷伊—塔巴里斯坦变迁差异：Before 为萨曼/阿拔斯旧界，After 为齐亚尔独立占领并产生雷伊争议面；核心布哈拉弧段受人工锁定保护。",
+      summary_zh: "928 年雷伊—塔巴里斯坦变迁差异：Before 为萨曼西线旧界，After 为齐亚尔独立占领并产生雷伊争议面；布哈拉核心弧段受人工锁定保护。",
       before_snapshot: beforeSnapshot,
       after_snapshot: afterSnapshot,
       affected_arc_ids: ["arc-928-abb-ray", "arc-928-ziy-ray", "arc-928-ray-kho", "arc-928-sam-kho"],
       affected_toponym_ids: ["top-rayy", "top-nishapur", "top-bukhara"],
     },
-    default_camera: { center: [60.8, 37.5], zoom: 4.5 },
+    default_camera: { center: [62.2, 38.0], zoom: 4.35 },
     modern_reference_overlay: MODERN_REFERENCE_OVERLAY,
   };
 }
@@ -817,7 +935,7 @@ function buildCrossZeroBundle(): EpochSceneBundle {
   const ev = ["event-1bce-cross-zero"];
 
   const arcs: SharedBoundaryArc[] = [
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-1ce-han-ext",
       epoch_id: epochId,
       coordinates: [[74.0, 39.0], [82.0, 36.8], [94.0, 36.5], [102.0, 39.2], [95.0, 42.4]],
@@ -829,7 +947,7 @@ function buildCrossZeroBundle(): EpochSceneBundle {
       valid_to_jdn: JDN_2CE,
       driven_by_event_ids: ev,
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-1ce-han-xiongnu",
       epoch_id: epochId,
       coordinates: [[95.0, 42.4], [87.0, 43.2], [79.0, 42.1], [74.0, 39.0]],
@@ -842,7 +960,7 @@ function buildCrossZeroBundle(): EpochSceneBundle {
       driven_by_event_ids: ev,
       certainty: "NATURAL_FEATURE",
     }),
-    makeArc({
+    makeSharedArc({
       arc_id: "arc-1ce-xiongnu-ext",
       epoch_id: epochId,
       coordinates: [[74.0, 39.0], [76.0, 46.0], [88.0, 48.0], [98.0, 46.2], [95.0, 42.4]],
@@ -889,13 +1007,7 @@ function buildCrossZeroBundle(): EpochSceneBundle {
     },
   ];
 
-  const snapshot = buildSnapshotFromSharedTopology(
-    epoch,
-    "rev-1ce-committed-001",
-    "COMMITTED",
-    arcs,
-    faces,
-  );
+  const snapshot = buildSnapshotFromSharedTopology(epoch, "rev-1ce-committed-001", "COMMITTED", arcs, faces);
   const ts1Bce = createHistoricalTimestamp({ astronomical_year: 0, calendar_era_note: "汉哀帝元寿二年" });
 
   return {
@@ -906,6 +1018,8 @@ function buildCrossZeroBundle(): EpochSceneBundle {
     revision_id: snapshot.revision_id,
     data_status: snapshot.data_status,
     is_demo_fixture: true,
+    recommended_style_id: "academic_inner_glow",
+    recommended_hud_types: ["DATE_ERA_BADGE", "SUBTITLE_BAR"],
     canonical_arcs: arcs,
     canonical_faces: faces,
     snapshot,
@@ -928,11 +1042,13 @@ function buildContractFixtureBundle(): EpochSceneBundle {
   return {
     epoch: sharedContractDraftSnapshot.epoch,
     epoch_label_zh: "Phase 0 契约夹具（Codex draftSnapshot）",
-    historical_year_display: "公元928年",
+    historical_year_display: "公元 928 年",
     calendar_era_note: "shared-schema 最小交接夹具",
     revision_id: sharedContractDraftSnapshot.revision_id,
     data_status: sharedContractDraftSnapshot.data_status,
     is_demo_fixture: true,
+    recommended_style_id: "vivid_video_songti",
+    recommended_hud_types: ["DATE_ERA_BADGE"],
     canonical_arcs: [],
     canonical_faces: [],
     snapshot: sharedContractDraftSnapshot,
@@ -961,9 +1077,12 @@ function buildContractFixtureBundle(): EpochSceneBundle {
 }
 
 export const DEMO_SCENE_BUNDLES: readonly EpochSceneBundle[] = [
-  buildCrossZeroBundle(),
-  build842Bundle(),
   build928Bundle(),
+  build842Bundle(),
+  build1300JochiBundle(),
+  build1672RampjaarBundle(),
+  build1841QingBundle(),
+  buildCrossZeroBundle(),
   buildContractFixtureBundle(),
 ];
 
