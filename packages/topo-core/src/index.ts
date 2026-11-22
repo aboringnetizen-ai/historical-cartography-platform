@@ -14,6 +14,7 @@ import type { ArcSmoothingCheck, ArcSmoothingCheckRequest } from "./smoothing-ga
 
 export { migrateTopology } from "./migrate.ts";
 export { openMapChangeSet, recheckMapChangeEvidence } from "./changesets.ts";
+export { submitMapChangeForReview } from "./review-submission.ts";
 export { readMapChangeDraft, reassignBaseUnits, registerDraftFaceLock, rollbackDraftReassignment } from "./draft-units.ts";
 export type { ArcSplinePreview, ArcSplineRequest } from "./spline-preview.ts";
 export { registerLandmarkInventory } from "./smoothing-gate.ts";

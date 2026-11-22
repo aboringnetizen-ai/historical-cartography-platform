@@ -158,9 +158,9 @@ export async function openMapChangeSet(
 }
 
 export async function recheckMapChangeEvidence(
-  pool: Pool, evidence: EventEvidenceReader, changeSetId: string,
+  database: Pick<Pool, "query">, evidence: EventEvidenceReader, changeSetId: string,
 ): Promise<MapChangeEvidenceCheck | null> {
-  const { rows } = await pool.query<{ bound_events: BoundEventRevision[] }>(`
+  const { rows } = await database.query<{ bound_events: BoundEventRevision[] }>(`
     SELECT coalesce((
       SELECT jsonb_agg(jsonb_build_object(
         'hist_event_id', b.hist_event_id, 'event_revision', b.event_revision, 'citation_indexes', b.citation_indexes

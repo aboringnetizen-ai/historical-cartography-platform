@@ -9,7 +9,7 @@ import type { EventEvidenceReader, EventEvidenceResult, EvidenceCitation, Histor
 import {
   checkSharedArcSmoothing, createDraftTopologyRevision, migrateTopology, openMapChangeSet,
   previewSharedArcSmoothing, readMapChangeDraft, readMapSnapshot, reassignBaseUnits, recheckMapChangeEvidence, registerDraftFaceLock,
-  registerLandmarkInventory, registerPaleoReference, rollbackDraftReassignment,
+  registerLandmarkInventory, registerPaleoReference, rollbackDraftReassignment, submitMapChangeForReview,
 } from "../src/index.ts";
 import type {
   ArcSmoothingCheckRequest, ArcSplineRequest, DraftFaceSeed, DraftTopologyInput, PaleoLineReference,
@@ -78,7 +78,7 @@ test("migrations are atomic and repeatable without repeating applied work", asyn
   const first = await readLedger();
   assert.deepEqual(first.rows.map(({ filename }) => filename), [
     "001_topology.sql", "002_paleo_references.sql", "003_smoothing_checks.sql", "004_open_changesets.sql",
-    "005_draft_unit_operations.sql",
+    "005_draft_unit_operations.sql", "006_review_submissions.sql",
   ]);
   await migrateTopology(pool);
   assert.deepEqual((await readLedger()).rows, first.rows);
@@ -635,4 +635,68 @@ test("a fresh evidence check blocks changed index revisions even when the event 
   assert.equal(stale?.status, "BLOCKED");
   assert.match(stale.issues[0]?.message ?? "", /index revision changed/);
   assert.deepEqual(stale.bound_events, current.bound_events);
+});
+
+test("review submission rechecks evidence on retries and invalidates older review records", async () => {
+  const draft = await openedFixtureDraft("review-gate", 957);
+  const reader: EventEvidenceReader = {
+    async verifyEvent({ hist_event_id }) { return verifiedEvent(hist_event_id); },
+  };
+  const empty = await submitMapChangeForReview(pool, reader, {
+    changeset_id: draft.changeset_id, expected_revision_id: draft.base_revision_id,
+  });
+  assert.deepEqual(empty, { status: "BLOCKED", reason: "NO_ACTIVE_OPERATION", issues: [] });
+  const edit = await reassignBaseUnits(pool, {
+    changeset_id: draft.changeset_id, operation_id: randomUUID(), expected_revision_id: draft.base_revision_id,
+    driven_by_event_ids: draft.bound_event_ids, assignments: [{ face_id: "west", control_score: 45, polity_id: null }],
+  });
+  const request = { changeset_id: draft.changeset_id, expected_revision_id: edit.revision_id };
+  const submitted = await submitMapChangeForReview(pool, reader, request);
+  assert.equal(submitted.status, "SUBMITTED_FOR_REVIEW");
+  assert.deepEqual(await submitMapChangeForReview(pool, reader, request), submitted);
+  const rejected = await submitMapChangeForReview(pool, {
+    async verifyEvent({ hist_event_id }) {
+      return { status: "REJECTED", hist_event_id, issues: [{
+        gate: "G3", code: "UNVERIFIED_SOURCE", entity_id: hist_event_id, message: "Fixture source changed",
+      }] };
+    },
+  }, request);
+  assert.equal(rejected.status, "BLOCKED");
+  assert.equal(rejected.reason, "EVIDENCE");
+  const { rows } = await pool.query<{ revoked: boolean }>(
+    "SELECT invalidated_at IS NOT NULL AS revoked FROM cartography.map_review_submissions WHERE review_id = $1",
+    [submitted.review_id],
+  );
+  assert.deepEqual(rows, [{ revoked: true }]);
+
+  const retried = await submitMapChangeForReview(pool, reader, request);
+  assert.equal(retried.status, "SUBMITTED_FOR_REVIEW");
+  assert.notEqual(retried.review_id, submitted.review_id);
+  await rollbackDraftReassignment(pool, draft.changeset_id, edit.operation_id);
+  assert.deepEqual(await submitMapChangeForReview(pool, reader, request), {
+    status: "BLOCKED", reason: "DRAFT_CHANGED", issues: [],
+  });
+  const active = await pool.query(
+    "SELECT 1 FROM cartography.map_review_submissions WHERE changeset_id = $1 AND invalidated_at IS NULL",
+    [draft.changeset_id],
+  );
+  assert.equal(active.rowCount, 0);
+});
+
+test("a new human lock blocks review of an already-edited draft", async () => {
+  const draft = await openedFixtureDraft("review-lock", 958);
+  const reader: EventEvidenceReader = {
+    async verifyEvent() { assert.fail("An already locked draft must not reach evidence verification"); },
+  };
+  const edit = await reassignBaseUnits(pool, {
+    changeset_id: draft.changeset_id, operation_id: randomUUID(), expected_revision_id: draft.base_revision_id,
+    driven_by_event_ids: draft.bound_event_ids, assignments: [{ face_id: "west", control_score: 45, polity_id: null }],
+  });
+  await registerDraftFaceLock(pool, edit.revision_id, "west");
+  const outcome = await submitMapChangeForReview(pool, reader, {
+    changeset_id: draft.changeset_id, expected_revision_id: edit.revision_id,
+  });
+  assert.equal(outcome.status, "BLOCKED");
+  assert.equal(outcome.reason, "HUMAN_LOCKED");
+  assert.equal(outcome.issues[0]?.entity_id, "west");
 });
