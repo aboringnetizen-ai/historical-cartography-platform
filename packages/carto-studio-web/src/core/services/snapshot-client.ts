@@ -8,6 +8,8 @@ import type {
   EventEvidenceResult,
   MapSnapshot,
   MapSnapshotRequest,
+  SharedBoundaryArc,
+  TerritorialFace,
   VerifiedCitation,
 } from "@historical-cartography/shared-schema";
 import {
@@ -15,7 +17,8 @@ import {
   resolveSceneBundleByEpochId,
   resolveSceneBundleByJdn,
 } from "../data/demo-dataset.ts";
-import type { EpochSceneBundle } from "../data/demo-types.ts";
+import type { EpochSceneBundle, PolityMetadata } from "../data/demo-types.ts";
+import { jdnToHistoricalParts } from "../director/timeline-math.ts";
 
 export type SnapshotLoadStatus = "LOADING" | "READY" | "NO_DATA" | "ERROR";
 
@@ -35,6 +38,102 @@ export interface SnapshotTransport {
   fetchEventEvidence(request: EventEvidenceRequest): Promise<EventEvidenceResult>;
 }
 
+/**
+ * Adapt a canonical frozen `MapSnapshot` from `topo-core` HTTP/RPC into an `EpochSceneBundle`
+ * without requiring backend services to know about frontend presentation state.
+ */
+export function adaptMapSnapshotToSceneBundle(raw: EpochSceneBundle | MapSnapshot): EpochSceneBundle {
+  if ("snapshot" in raw && "canonical_arcs" in raw) {
+    return raw;
+  }
+  const snap = raw as MapSnapshot;
+  let minLon = Infinity;
+  let maxLon = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  const polityIds = new Set<string>();
+
+  const canonicalFaces: TerritorialFace[] = snap.territories.features.map((feat) => {
+    const pid = feat.properties.polity_id;
+    if (pid) polityIds.add(pid);
+    for (const pt of feat.geometry.coordinates[0] ?? []) {
+      const lon = pt[0] ?? 0;
+      const lat = pt[1] ?? 0;
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    return {
+      face_id: feat.properties.face_id,
+      epoch_id: snap.epoch.epoch_id,
+      boundary_arc_ids: feat.properties.boundary_arc_ids,
+      zone_semantics: feat.properties.zone_semantics,
+      ...(pid !== undefined ? { polity_id: pid } : {}),
+      control_score: feat.properties.control_score,
+      valid_from_jdn: snap.epoch.valid_from_jdn,
+      valid_to_jdn: snap.epoch.valid_to_jdn,
+      highest_credibility_tier: "T1_PRIMARY_AND_LOCAL_ACADEMIC",
+      driven_by_event_ids: [],
+      human_locked_override: false,
+    };
+  });
+
+  const canonicalArcs: SharedBoundaryArc[] = snap.boundaries.features.map((b) => ({
+    arc_id: b.properties.arc_id,
+    epoch_id: snap.epoch.epoch_id,
+    canonical_geometry: b.geometry,
+    smoothness_profile_id: "profile-cartographic-natural",
+    start_node_id: b.properties.start_node_id,
+    end_node_id: b.properties.end_node_id,
+    left_face_id: b.properties.left_face_id ?? "EXTERIOR_WORLD",
+    right_face_id: b.properties.right_face_id ?? "EXTERIOR_WORLD",
+    certainty: "CERTAIN_EXACT",
+    valid_from_jdn: snap.epoch.valid_from_jdn,
+    valid_to_jdn: snap.epoch.valid_to_jdn,
+    driven_by_event_ids: [],
+    human_locked_override: false,
+  }));
+
+  const parts = jdnToHistoricalParts(snap.epoch.valid_from_jdn);
+  const center: [number, number] = Number.isFinite(minLon) && Number.isFinite(minLat)
+    ? [(minLon + maxLon) / 2, (minLat + maxLat) / 2]
+    : [62.0, 38.0];
+  const polities: PolityMetadata[] = Array.from(polityIds).map((pid) => ({
+    polity_id: pid,
+    name_zh: pid,
+    preferred_hex: "#3b82f6",
+    monarch_name: "服务端政权数据",
+    era_label: parts.historical_year_display,
+    summary: `来自后端 topo-core 快照 (${snap.revision_id})`,
+  }));
+
+  return {
+    epoch: snap.epoch,
+    epoch_label_zh: `${parts.historical_year_display} · ${snap.epoch.epoch_id}`,
+    historical_year_display: parts.historical_year_display,
+    calendar_era_note: `epoch=${snap.epoch.epoch_id}`,
+    revision_id: snap.revision_id,
+    data_status: snap.data_status,
+    is_demo_fixture: false,
+    canonical_arcs: canonicalArcs,
+    canonical_faces: canonicalFaces,
+    snapshot: snap,
+    admin_units: [],
+    admin_evolutions: [],
+    toponyms: [],
+    events: [],
+    sources: [],
+    citations_by_id: {},
+    figures: [],
+    paleo_overlays: [],
+    marching_routes: [],
+    polities,
+    default_camera: { center, zoom: 4.5 },
+    modern_reference_overlay: { type: "FeatureCollection", features: [] },
+  };
+}
+
 export class DemoSnapshotTransport implements SnapshotTransport {
   private readonly simulatedDelayMsByEpoch: Map<string, number>;
   private readonly forcedErrorEpochs: Set<string>;
@@ -43,16 +142,36 @@ export class DemoSnapshotTransport implements SnapshotTransport {
     simulatedDelayMsByEpoch?: Record<string, number>;
     forcedErrorEpochs?: string[];
   }) {
-    this.simulatedDelayMsByEpoch = new Map(
-      Object.entries(options?.simulatedDelayMsByEpoch ?? {}),
-    );
+    this.simulatedDelayMsByEpoch = new Map(Object.entries(options?.simulatedDelayMsByEpoch ?? {}));
     this.forcedErrorEpochs = new Set(options?.forcedErrorEpochs ?? []);
   }
 
   async fetchSnapshot(request: MapSnapshotRequest): Promise<EpochSceneBundle | undefined> {
-    if (request.revision_id === "880a2ba0-dea5-4e96-b642-8407867d7eb6") {
-      return resolveSceneBundleByEpochId("contract-fixture");
+    if (request.revision_id !== "latest") {
+      for (const b of DEMO_SCENE_BUNDLES) {
+        if (b.snapshot.revision_id === request.revision_id) return b;
+        if (b.diff_record?.before_snapshot.revision_id === request.revision_id) {
+          return {
+            ...b,
+            revision_id: b.diff_record.before_snapshot.revision_id,
+            data_status: b.diff_record.before_snapshot.data_status,
+            snapshot: b.diff_record.before_snapshot,
+          };
+        }
+        if (b.diff_record?.after_snapshot.revision_id === request.revision_id) {
+          return {
+            ...b,
+            revision_id: b.diff_record.after_snapshot.revision_id,
+            data_status: b.diff_record.after_snapshot.data_status,
+            snapshot: b.diff_record.after_snapshot,
+          };
+        }
+      }
+      if (request.revision_id === "880a2ba0-dea5-4e96-b642-8407867d7eb6") {
+        return resolveSceneBundleByEpochId("contract-fixture");
+      }
     }
+
     const matched = resolveSceneBundleByJdn(request.historical_jdn);
     const delay = matched ? (this.simulatedDelayMsByEpoch.get(matched.epoch.epoch_id) ?? 0) : 0;
     if (delay > 0) {
@@ -61,24 +180,12 @@ export class DemoSnapshotTransport implements SnapshotTransport {
     if (matched && this.forcedErrorEpochs.has(matched.epoch.epoch_id)) {
       throw new Error(`模拟后端快照异常：${matched.epoch.epoch_id}`);
     }
-    if (request.revision_id.startsWith("rev-") && matched && request.revision_id === "rev-928-before-001" && matched.diff_record) {
-      return {
-        ...matched,
-        revision_id: matched.diff_record.before_snapshot.revision_id,
-        data_status: matched.diff_record.before_snapshot.data_status,
-        snapshot: matched.diff_record.before_snapshot,
-      };
-    }
     return matched;
   }
 
   async fetchEventEvidence(request: EventEvidenceRequest): Promise<EventEvidenceResult> {
-    if (request.hist_event_id === "fixture-event-rejected") {
-      return rejectedEvidence;
-    }
-    if (request.hist_event_id === "fixture-event") {
-      return pendingEvidence;
-    }
+    if (request.hist_event_id === "fixture-event-rejected") return rejectedEvidence;
+    if (request.hist_event_id === "fixture-event") return pendingEvidence;
 
     for (const bundle of DEMO_SCENE_BUNDLES) {
       const event = bundle.events.find((item) => item.hist_event_id === request.hist_event_id);
@@ -117,12 +224,12 @@ export class DemoSnapshotTransport implements SnapshotTransport {
       const verified: VerifiedCitation[] = event.citations.map((cit) => ({
         citation_id: cit.citation_id,
         source_doc_id: cit.source_doc_id,
-        index_revision: request.event_revision ?? "idx-v4-928-001",
+        index_revision: request.event_revision ?? `idx-${bundle.revision_id}`,
         evidence: cit,
       }));
       return {
         status: "VERIFIED",
-        event_revision: request.event_revision ?? "ev-rev-928-001",
+        event_revision: request.event_revision ?? `ev-${bundle.revision_id}`,
         event,
         verified_citations: verified,
       };
@@ -157,10 +264,9 @@ export class HttpSnapshotTransport implements SnapshotTransport {
       body: JSON.stringify(request),
     });
     if (res.status === 404) return undefined;
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} fetching snapshot`);
-    }
-    return (await res.json()) as EpochSceneBundle;
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching snapshot`);
+    const payload = (await res.json()) as EpochSceneBundle | MapSnapshot;
+    return adaptMapSnapshotToSceneBundle(payload);
   }
 
   async fetchEventEvidence(request: EventEvidenceRequest): Promise<EventEvidenceResult> {
@@ -169,16 +275,13 @@ export class HttpSnapshotTransport implements SnapshotTransport {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} verifying event evidence`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status} verifying event evidence`);
     return (await res.json()) as EventEvidenceResult;
   }
 }
 
 /**
  * Snapshot & evidence coordinator with strict monotonic request-sequence stale guard.
- * Ensures out-of-order responses from slower queries NEVER overwrite newer timestamps.
  */
 export class MapSnapshotClient implements EventEvidenceReader {
   private readonly transport: SnapshotTransport;

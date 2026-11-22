@@ -39,7 +39,7 @@ const DAY_PER_YEAR = 365.2425;
 
 /**
  * Inverse proleptic Gregorian JDN -> astronomical date fields without using JS `Date`.
- * Matches `julianDayAtMidnight` in `packages/shared-schema/src/historical-time.ts`.
+ * Carries rounding overflows cleanly at 23:59:30+ into the following calendar day.
  */
 export function jdnToHistoricalParts(jdn: number): {
   astronomical_year: number;
@@ -50,8 +50,15 @@ export function jdnToHistoricalParts(jdn: number): {
   historical_year_display: string;
 } {
   const shifted = jdn + 0.5;
-  const z = Math.floor(shifted);
+  let z = Math.floor(shifted);
   const f = shifted - z;
+
+  const rawMinutes = Math.round(f * 1440);
+  const carryDays = Math.floor(rawMinutes / 1440);
+  z += carryDays;
+  const totalMinutes = rawMinutes - carryDays * 1440;
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
 
   let a = z;
   const alpha = Math.floor((z - 1867216.25) / 36524.25);
@@ -65,10 +72,6 @@ export function jdnToHistoricalParts(jdn: number): {
   const day = b - d - Math.floor(30.6001 * e);
   const month = e < 14 ? e - 1 : e - 13;
   const astronomical_year = month > 2 ? c - 4716 : c - 4715;
-
-  const totalMinutes = Math.round(f * 1440) % 1440;
-  const hour = Math.floor(totalMinutes / 60);
-  const minute = totalMinutes % 60;
 
   return {
     astronomical_year,
@@ -136,7 +139,7 @@ export function zoomTimelineViewport(
   viewport: TimelineViewport,
   anchorRatio: number,
   zoomFactor: number,
-  minSpanDays = 0.25, // 6 hours minimum tactical campaign scale
+  minSpanDays = 0.25,
   maxSpanDays = DAY_PER_YEAR * 2500,
 ): TimelineViewport {
   const clampedRatio = Math.max(0, Math.min(1, anchorRatio));
@@ -155,35 +158,108 @@ export function zoomTimelineViewport(
   };
 }
 
+export function panTimelineViewport(
+  viewport: TimelineViewport,
+  deltaRatio: number,
+): TimelineViewport {
+  const span = Math.max(0.25, viewport.max_jdn - viewport.min_jdn);
+  const deltaJdn = deltaRatio * span;
+  return {
+    ...viewport,
+    min_jdn: viewport.min_jdn + deltaJdn,
+    max_jdn: viewport.max_jdn + deltaJdn,
+    cursor_jdn: Math.max(viewport.min_jdn + deltaJdn, Math.min(viewport.max_jdn + deltaJdn, viewport.cursor_jdn)),
+  };
+}
+
+/**
+ * Generate calendar-exact ticks aligned to round centuries/decades/years/months/days/hours.
+ */
 export function generateTimelineTicks(
   viewport: TimelineViewport,
   targetCount = 7,
 ): TimelineTick[] {
   const span = Math.max(1e-6, viewport.max_jdn - viewport.min_jdn);
-  const rawStep = span / Math.max(2, targetCount);
-
-  let stepDays: number;
-  if (span >= DAY_PER_YEAR * 400) stepDays = DAY_PER_YEAR * 100;
-  else if (span >= DAY_PER_YEAR * 80) stepDays = DAY_PER_YEAR * 20;
-  else if (span >= DAY_PER_YEAR * 8) stepDays = DAY_PER_YEAR;
-  else if (span >= 90) stepDays = 30;
-  else if (span >= 6) stepDays = 1;
-  else stepDays = Math.max(1 / 24, rawStep);
-
-  const startIndex = Math.ceil(viewport.min_jdn / stepDays);
-  const endIndex = Math.floor(viewport.max_jdn / stepDays);
   const ticks: TimelineTick[] = [];
 
-  for (let i = startIndex; i <= endIndex && ticks.length < 32; i++) {
-    const jdn = i * stepDays;
-    const ratio = (jdn - viewport.min_jdn) / span;
-    if (ratio < -0.001 || ratio > 1.001) continue;
-    ticks.push({
-      jdn,
-      ratio: Math.max(0, Math.min(1, ratio)),
-      label: formatJdnLabel(jdn, viewport.granularity),
-      is_major: i % 2 === 0,
-    });
+  if (span >= DAY_PER_YEAR * 3) {
+    const startYear = jdnToHistoricalParts(viewport.min_jdn).astronomical_year;
+    const endYear = jdnToHistoricalParts(viewport.max_jdn).astronomical_year;
+    const yearSpan = Math.max(1, endYear - startYear);
+    const candidates = [1, 2, 5, 10, 20, 50, 100, 200, 500];
+    let stepYears = 100;
+    for (const c of candidates) {
+      if (yearSpan / c <= targetCount + 2) {
+        stepYears = c;
+        break;
+      }
+    }
+    const firstYr = Math.ceil(startYear / stepYears) * stepYears;
+    for (let yr = firstYr; yr <= endYear && ticks.length < 28; yr += stepYears) {
+      const jdn = createHistoricalTimestamp({ astronomical_year: yr }).julian_day_number;
+      const ratio = (jdn - viewport.min_jdn) / span;
+      if (ratio < -0.001 || ratio > 1.001) continue;
+      ticks.push({
+        jdn,
+        ratio: Math.max(0, Math.min(1, ratio)),
+        label: formatHistoricalYear(yr),
+        is_major: yr % (stepYears * 2) === 0,
+      });
+    }
+  } else if (span >= 45) {
+    const startParts = jdnToHistoricalParts(viewport.min_jdn);
+    const endParts = jdnToHistoricalParts(viewport.max_jdn);
+    let yr = startParts.astronomical_year;
+    let m = startParts.month;
+    const totalMonths = (endParts.astronomical_year - startParts.astronomical_year) * 12 + (endParts.month - startParts.month);
+    const stepM = totalMonths > 18 ? 3 : 1;
+    while ((yr < endParts.astronomical_year || (yr === endParts.astronomical_year && m <= endParts.month)) && ticks.length < 24) {
+      const jdn = createHistoricalTimestamp({ astronomical_year: yr, month: m, day: 1 }).julian_day_number;
+      const ratio = (jdn - viewport.min_jdn) / span;
+      if (ratio >= -0.001 && ratio <= 1.001) {
+        ticks.push({
+          jdn,
+          ratio: Math.max(0, Math.min(1, ratio)),
+          label: `${formatHistoricalYear(yr)}${m}月`,
+          is_major: m === 1,
+        });
+      }
+      m += stepM;
+      while (m > 12) {
+        m -= 12;
+        yr += 1;
+      }
+    }
+  } else if (span >= 3) {
+    const stepDays = span > 24 ? 3 : 1;
+    const firstDay = Math.ceil(viewport.min_jdn - 0.5) + 0.5;
+    for (let jdn = firstDay; jdn <= viewport.max_jdn && ticks.length < 28; jdn += stepDays) {
+      const ratio = (jdn - viewport.min_jdn) / span;
+      if (ratio < -0.001 || ratio > 1.001) continue;
+      ticks.push({
+        jdn,
+        ratio: Math.max(0, Math.min(1, ratio)),
+        label: formatJdnLabel(jdn, "DAY"),
+        is_major: Math.round(jdn - 0.5) % 5 === 0,
+      });
+    }
+  } else {
+    const spanHours = span * 24;
+    const stepH = spanHours > 48 ? 6 : spanHours > 18 ? 3 : 1;
+    const stepDays = stepH / 24;
+    const startIdx = Math.ceil((viewport.min_jdn + 0.5) / stepDays);
+    const endIdx = Math.floor((viewport.max_jdn + 0.5) / stepDays);
+    for (let idx = startIdx; idx <= endIdx && ticks.length < 24; idx++) {
+      const jdn = idx * stepDays - 0.5;
+      const ratio = (jdn - viewport.min_jdn) / span;
+      if (ratio < -0.001 || ratio > 1.001) continue;
+      ticks.push({
+        jdn,
+        ratio: Math.max(0, Math.min(1, ratio)),
+        label: formatJdnLabel(jdn, "HOUR"),
+        is_major: idx % 2 === 0,
+      });
+    }
   }
 
   if (ticks.length === 0) {
@@ -198,24 +274,12 @@ export function generateTimelineTicks(
 export function buildPresetTimelineSpan(granularity: TimeGranularity, cursorJdn: number): TimelineViewport {
   let halfSpanDays: number;
   switch (granularity) {
-    case "CENTURY":
-      halfSpanDays = DAY_PER_YEAR * 600;
-      break;
-    case "DECADE":
-      halfSpanDays = DAY_PER_YEAR * 60;
-      break;
-    case "YEAR":
-      halfSpanDays = DAY_PER_YEAR * 5;
-      break;
-    case "MONTH":
-      halfSpanDays = 180;
-      break;
-    case "DAY":
-      halfSpanDays = 12;
-      break;
-    case "HOUR":
-      halfSpanDays = 0.75; // 36-hour tactical battle window
-      break;
+    case "CENTURY": halfSpanDays = DAY_PER_YEAR * 600; break;
+    case "DECADE": halfSpanDays = DAY_PER_YEAR * 60; break;
+    case "YEAR": halfSpanDays = DAY_PER_YEAR * 5; break;
+    case "MONTH": halfSpanDays = 180; break;
+    case "DAY": halfSpanDays = 12; break;
+    case "HOUR": halfSpanDays = 0.75; break;
   }
   return {
     min_jdn: cursorJdn - halfSpanDays,
@@ -237,58 +301,74 @@ export function screenRatioToJdn(ratio: number, viewport: TimelineViewport): num
 
 export const DEFAULT_DYNASTY_BANDS: DynastyEraBand[] = [
   {
-    band_id: "band-han-xiyu",
-    label_zh: "西汉 · 西域都护府",
-    era_note: "前 1 年 — 公元 1 年（跨零点连续）",
-    polity_id: "polity-han",
-    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: -1 }).julian_day_number,
-    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 4 }).julian_day_number,
-    color_hex: "#c95b38",
+    band_id: "band-ca-960-conversion",
+    label_zh: "960年 · 突厥二十万帐改宗基线",
+    era_note: "公元 960–961 年 / 回历 349–350 年 / 北宋建隆元–二年",
+    polity_id: "polity-qarakhanid",
+    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 960, month: 1, day: 1 }).julian_day_number,
+    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 962, month: 5, day: 15 }).julian_day_number,
+    focus_jdn: createHistoricalTimestamp({ astronomical_year: 960, month: 6, day: 1 }).julian_day_number,
+    parallel_eras: [
+      { polity_zh: "北宋", era_text: "太祖建隆元–二年" },
+      { polity_zh: "回历", era_text: "349–350 AH" },
+    ],
+    color_hex: "#d946ef",
   },
   {
-    band_id: "band-samanid-842",
-    label_zh: "萨曼家族河中统合",
-    era_note: "公元 842 年 / 会昌二年",
+    band_id: "band-ca-962-ghazna",
+    label_zh: "962年 · 阿尔普特勤取加兹尼",
+    era_note: "公元 962–966 年 / 回历 351–355 年 / 北宋建隆三年–乾德四年",
+    polity_id: "polity-ghaznavid",
+    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 962, month: 5, day: 15 }).julian_day_number,
+    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 967, month: 12, day: 1 }).julian_day_number,
+    focus_jdn: createHistoricalTimestamp({ astronomical_year: 962, month: 5, day: 15 }).julian_day_number,
+    parallel_eras: [
+      { polity_zh: "北宋", era_text: "建隆三年–乾德四年" },
+      { polity_zh: "回历", era_text: "351–355 AH" },
+    ],
+    color_hex: "#0d9488",
+  },
+  {
+    band_id: "band-ca-968-kerman",
+    label_zh: "967–968年 · 白益吞并克尔曼",
+    era_note: "公元 967–969 年 / 回历 356–358 年 / 北宋开宝元–二年",
+    polity_id: "polity-buyid",
+    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 967, month: 12, day: 1 }).julian_day_number,
+    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 970, month: 8, day: 15 }).julian_day_number,
+    focus_jdn: createHistoricalTimestamp({ astronomical_year: 968, month: 6, day: 15 }).julian_day_number,
+    parallel_eras: [
+      { polity_zh: "北宋", era_text: "太祖开宝元–二年" },
+      { polity_zh: "回历", era_text: "356–358 AH" },
+    ],
+    color_hex: "#2563eb",
+  },
+  {
+    band_id: "band-ca-970-khotan",
+    label_zh: "970年 · 于阗克喀什噶尔与锡斯坦内战",
+    era_note: "公元 970–971 年 / 回历 359–360 年 / 北宋开宝三–四年",
+    polity_id: "polity-khotan",
+    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 970, month: 8, day: 15 }).julian_day_number,
+    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 972, month: 4, day: 15 }).julian_day_number,
+    focus_jdn: createHistoricalTimestamp({ astronomical_year: 970, month: 8, day: 15 }).julian_day_number,
+    parallel_eras: [
+      { polity_zh: "北宋", era_text: "开宝三–四年 (于阗献舞象)" },
+      { polity_zh: "回历", era_text: "359–360 AH" },
+    ],
+    color_hex: "#eab308",
+  },
+  {
+    band_id: "band-ca-975-treaty",
+    label_zh: "972–975年 · 萨曼—白益纳贡和约与加德兹",
+    era_note: "公元 972–975 年 / 回历 361–364 年 / 北宋开宝五–八年",
     polity_id: "polity-samanid",
-    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 819 }).julian_day_number,
-    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 874 }).julian_day_number,
-    color_hex: "#3ca653",
-  },
-  {
-    band_id: "band-samanid-928",
-    label_zh: "萨曼—齐亚尔全盛与雷伊之役",
-    era_note: "公元 928 年 / 天成三年 / 回历 316 年",
-    polity_id: "polity-samanid",
-    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 875 }).julian_day_number,
-    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 999 }).julian_day_number,
-    color_hex: "#2dbd66",
-  },
-  {
-    band_id: "band-jochi-1300",
-    label_zh: "术赤兀鲁思 (坤舆府)",
-    era_note: "公元 1300 年 / 元大德四年",
-    polity_id: "polity-jochi",
-    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 1242 }).julian_day_number,
-    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 1360 }).julian_day_number,
-    color_hex: "#c8b37c",
-  },
-  {
-    band_id: "band-rampjaar-1672",
-    label_zh: "法荷战争 · 1672 灾年战役",
-    era_note: "1672年12月09日 20:00",
-    polity_id: "polity-netherlands",
-    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 1665 }).julian_day_number,
-    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 1680 }).julian_day_number,
-    color_hex: "#c92a2a",
-  },
-  {
-    band_id: "band-qing-1841",
-    label_zh: "大清 · 道光二十一年",
-    era_note: "公元1841年 / 清宣宗道光21年",
-    polity_id: "polity-qing",
-    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 1800 }).julian_day_number,
-    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 1860 }).julian_day_number,
-    color_hex: "#129136",
+    valid_from_jdn: createHistoricalTimestamp({ astronomical_year: 972, month: 4, day: 15 }).julian_day_number,
+    valid_to_jdn: createHistoricalTimestamp({ astronomical_year: 976, month: 6, day: 15 }).julian_day_number,
+    focus_jdn: createHistoricalTimestamp({ astronomical_year: 972, month: 4, day: 15 }).julian_day_number,
+    parallel_eras: [
+      { polity_zh: "北宋", era_text: "开宝五–八年" },
+      { polity_zh: "回历", era_text: "361–364 AH" },
+    ],
+    color_hex: "#1f9d55",
   },
 ];
 

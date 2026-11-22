@@ -21,7 +21,16 @@ export interface PolityMetadata {
   monarch_name: string;
   era_label: string;
   capital_toponym_id?: string;
+  emblem_symbol?: string;
   summary: string;
+}
+
+export interface FigurePortraitStyle {
+  bg_hex: string;
+  cloak_hex: string;
+  skin_hex: string;
+  crown_type: "turban" | "crown" | "helmet" | "hat";
+  beard?: boolean;
 }
 
 export interface HistoricalFigure {
@@ -34,13 +43,15 @@ export interface HistoricalFigure {
   coordinates?: [number, number];
   portrait_monogram: string;
   accent_hex: string;
+  portrait_style?: FigurePortraitStyle;
+  route_points?: [number, number][];
   summary: string;
 }
 
 export interface PaleoGeoOverlay {
   feature_id: string;
   epoch_id: string;
-  feature_type: "PALEO_RIVER" | "PALEO_COASTLINE" | "SILK_ROAD" | "MODERN_PROVINCE";
+  feature_type: "PALEO_RIVER" | "PALEO_COASTLINE" | "SILK_ROAD" | "ETHNIC_TRIBE" | "MODERN_PROVINCE" | "POPULATION_HUB";
   label_zh: string;
   geometry: LineString | Polygon;
   is_historical_override: boolean;
@@ -72,6 +83,8 @@ export interface DynastyEraBand {
   polity_id: string;
   valid_from_jdn: number;
   valid_to_jdn: number;
+  focus_jdn: number;
+  parallel_eras?: Array<{ polity_zh: string; era_text: string }>;
   color_hex: string;
 }
 
@@ -98,8 +111,16 @@ export interface EpochSceneBundle {
     title_zh: string;
     title_en: string;
     accent_hex: string;
-    members: Array<{ name_zh: string; name_orig: string; commander?: string }>;
+    swatch_ramp?: string[];
+    members: Array<{
+      name_zh: string;
+      name_orig: string;
+      commander?: string;
+      emblem?: string;
+      portrait_style?: FigurePortraitStyle;
+    }>;
   }>;
+  superseded_modern_rivers?: string[];
   water_labels?: WaterBodyLabel[];
   canonical_arcs: SharedBoundaryArc[];
   canonical_faces: TerritorialFace[];

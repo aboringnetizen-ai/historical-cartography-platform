@@ -7,32 +7,53 @@ import type {
   LayerVisibilityConfig,
   MapSnapshot,
 } from "@historical-cartography/shared-schema";
-import type { Feature, FeatureCollection, LineString, Polygon } from "geojson";
+import type { FeatureCollection, LineString } from "geojson";
+import { hexToRgb } from "../core/color/ciede2000.ts";
 import type { EpochSceneBundle } from "../core/data/demo-types.ts";
-import { evaluateControlScoreVisuals, hexToRgb } from "../core/color/ciede2000.ts";
+import { extractPolityOuterPerimeterRings } from "../core/data/topology-builder.ts";
+import { interpolateMorphSnapshot } from "../core/director/morph-engine.ts";
 import {
   buildPolitySpineLabels,
+  estimateTextWidthPx,
   evaluateToponymLayout,
   projectLonLatToScreen,
   type LabelLayoutReport,
+  type ScreenBox,
 } from "../core/layout/label-collision.ts";
 import type { DeterministicFrameBridge } from "../core/render/deterministic-bridge.ts";
+import { MapCurtainView } from "./MapCurtainView.tsx";
+import {
+  buildBoundaryRenderCollection,
+  buildFullWorldPolygonGeoJson,
+  buildGraticuleGeoJson,
+  buildPaleoAndCustomCollections,
+  buildTerritoryRenderCollection,
+  type CurtainMode,
+} from "./map-geojson-builders.ts";
+import { MapSvgOverlay, type MorphVisualState } from "./map-svg-overlay.tsx";
 import {
   AWS_TERRARIUM_DEM_TILES,
   BorderShaderWebGLLayer,
-  buildInwardRibbonBuffer,
+  buildConcaveSafeInwardRibbonBuffer,
+  buildPolygonHatchBuffer,
+  buildTerritoryFillBuffer,
+  getParchmentPatternData,
   getRealBasemapTheme,
 } from "./map-webgl-layers.tsx";
 
-export type CurtainMode = "NONE" | "BEFORE_AFTER" | "PURE_VS_CONTROL";
+export type { CurtainMode };
 
 export interface MapCanvasProps {
   bundle: EpochSceneBundle;
   displaySnapshot: MapSnapshot;
   ghostSnapshot?: MapSnapshot | undefined;
+  morphVisual?: MorphVisualState | undefined;
+  currentJdn?: number | undefined;
   stylePack: ComposableStylePack;
   layerConfig: LayerVisibilityConfig;
   polityColors: Record<string, string>;
+  opacityMultiplier?: number | undefined;
+  saturationMultiplier?: number | undefined;
   camera: { center: [number, number]; zoom: number; bearing_deg: number; pitch_deg: number };
   spotlightPolityId?: string | undefined;
   selectedPolityId?: string | undefined;
@@ -40,93 +61,64 @@ export interface MapCanvasProps {
   showGhostBorder: boolean;
   curtainMode: CurtainMode;
   curtainRatio: number;
+  resetViewTick?: number | undefined;
   onCurtainRatioChange: (ratio: number) => void;
   onCameraChange: (cam: { center: [number, number]; zoom: number; bearing_deg: number; pitch_deg: number }) => void;
   onLiveProjectorReady?: (projectFn: (lonLat: [number, number]) => [number, number]) => void;
   onLiveFrameMove?: (tick: number) => void;
   onSelectFace: (faceId: string, polityId?: string) => void;
+  onSelectArc?: (arcId: string) => void;
   onSelectToponym: (toponym: HistoricalToponym) => void;
+  onSelectEventId?: (eventId: string) => void;
   onLabelReport: (report: LabelLayoutReport) => void;
   onRegisterAwaitIdle?: (fn: () => Promise<void>) => void;
+  onMapError?: (message: string) => void;
+  onCanvasReady?: (capturePng: () => string | null) => void;
   bridge: DeterministicFrameBridge;
-}
-
-function buildGraticuleGeoJson(): FeatureCollection<LineString> {
-  const features: Array<Feature<LineString>> = [];
-  for (let lon = -180; lon <= 180; lon += 10) {
-    features.push({
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: [[lon, -80], [lon, 80]] },
-      properties: { kind: "meridian", value: lon },
-    });
-  }
-  for (let lat = -70; lat <= 70; lat += 10) {
-    features.push({
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: [[-180, lat], [180, lat]] },
-      properties: { kind: "parallel", value: lat },
-    });
-  }
-  return { type: "FeatureCollection", features };
-}
-
-function buildTerritoryRenderCollection(
-  snapshot: MapSnapshot,
-  bundle: EpochSceneBundle,
-  stylePack: ComposableStylePack,
-  layerConfig: LayerVisibilityConfig,
-  polityColors: Record<string, string>,
-  spotlightPolityId?: string,
-): FeatureCollection<Polygon> {
-  const canonicalFaceById = new Map(bundle.canonical_faces.map((f) => [f.face_id, f]));
-  const useSpotlight = stylePack.border_shader.mode === "spotlight_isolation" && Boolean(spotlightPolityId);
-
-  return {
-    type: "FeatureCollection",
-    features: snapshot.territories.features.map((feat) => {
-      const faceId = feat.properties.face_id;
-      const pid = feat.properties.polity_id ?? faceId;
-      const baseHex = polityColors[pid] ?? "#2dbd66";
-      const vis = evaluateControlScoreVisuals(
-        baseHex,
-        feat.properties.control_score,
-        stylePack.territory_rendering,
-        layerConfig.base_mode,
-        layerConfig.control_intensity_render_mode ?? "OPACITY_GRADIENT",
-      );
-      const canonicalFace = canonicalFaceById.get(faceId);
-      const dimmed = useSpotlight && pid !== spotlightPolityId;
-      const fillOpacity = dimmed
-        ? 0.14
-        : feat.properties.zone_semantics === "DISPUTED_OVERLAP"
-          ? Math.max(0.32, vis.fill_opacity * 0.78)
-          : vis.fill_opacity;
-
-      return {
-        type: "Feature",
-        id: faceId,
-        geometry: feat.geometry,
-        properties: {
-          ...feat.properties,
-          fill_hex: dimmed ? "#475569" : vis.fill_hex,
-          fill_opacity: fillOpacity,
-          is_locked: canonicalFace?.human_locked_override ? 1 : 0,
-          is_disputed: feat.properties.zone_semantics === "DISPUTED_OVERLAP" ? 1 : 0,
-        },
-      };
-    }),
-  };
 }
 
 export function MapCanvas(props: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const shaderLayerRef = useRef<BorderShaderWebGLLayer | null>(null);
+  const draggingCurtainRef = useRef(false);
+  const currentTileUrlRef = useRef<string>("");
+  const onSelectFaceRef = useRef(props.onSelectFace);
+  const onSelectArcRef = useRef(props.onSelectArc);
+  onSelectFaceRef.current = props.onSelectFace;
+  onSelectArcRef.current = props.onSelectArc;
+
   const [webglFallback, setWebglFallback] = useState(false);
+  const [mapStyleReady, setMapStyleReady] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 1280, height: 720 });
   const [liveFrameTick, setLiveFrameTick] = useState(0);
   const [liveView, setLiveView] = useState(props.camera);
-  const currentBasemapIdRef = useRef(props.stylePack.basemap.basemap_id);
+  const userNavigatedRef = useRef(false);
+
+  const fitOverviewBounds = useCallback((map: maplibregl.Map | null) => {
+    if (!map) return;
+    map.fitBounds(
+      [
+        [44.5, 25.5],
+        [91.5, 51.5],
+      ],
+      {
+        padding: { top: 36, bottom: 56, left: 22, right: 22 },
+        duration: 0,
+      },
+    );
+  }, []);
+
+  const effectiveSnapshot = useMemo(() => {
+    const mv = props.morphVisual;
+    if (mv && mv.plan.is_homeomorphic && mv.progress > 0 && mv.progress < 1) {
+      return interpolateMorphSnapshot(mv.from_snapshot, mv.to_snapshot, mv.progress, mv.plan);
+    }
+    return props.displaySnapshot;
+  }, [props.morphVisual, props.displaySnapshot]);
+
+  const spotlightActive =
+    props.stylePack.border_shader.mode === "spotlight_isolation" && Boolean(props.spotlightPolityId);
 
   const basemapTheme = useMemo(
     () =>
@@ -134,11 +126,13 @@ export function MapCanvas(props: MapCanvasProps) {
         props.stylePack.basemap.basemap_id,
         props.stylePack.basemap.desaturation,
         props.stylePack.basemap.hillshade_exaggeration,
+        spotlightActive,
       ),
     [
       props.stylePack.basemap.basemap_id,
       props.stylePack.basemap.desaturation,
       props.stylePack.basemap.hillshade_exaggeration,
+      spotlightActive,
     ],
   );
 
@@ -164,6 +158,29 @@ export function MapCanvas(props: MapCanvasProps) {
     props.onLiveProjectorReady?.(projectForOverlay);
   }, [projectForOverlay, props.onLiveProjectorReady]);
 
+  const spineLabels = useMemo(
+    () => buildPolitySpineLabels(effectiveSnapshot, props.bundle.polities, props.stylePack.typography),
+    [effectiveSnapshot, props.bundle.polities, props.stylePack.typography],
+  );
+
+  const obstacleBoxes = useMemo<Array<{ id: string; box: ScreenBox }>>(() => {
+    const fontSize = Math.max(15, Math.min(25, 11 + liveView.zoom * 1.9));
+    const boxes: Array<{ id: string; box: ScreenBox }> = [];
+    for (const s of spineLabels) {
+      const [sx, sy] = projectForOverlay(s.properties.center);
+      const w = Math.max(48, estimateTextWidthPx(s.properties.label_primary, fontSize) * (1 + s.properties.letter_spacing_em * 0.4));
+      const h = s.properties.label_secondary ? fontSize * 2.1 : fontSize * 1.35;
+      boxes.push({ id: `polity-${s.properties.polity_id}`, box: { x: sx - w / 2, y: sy - fontSize * 0.8, width: w, height: h } });
+    }
+    for (const wl of props.bundle.water_labels ?? []) {
+      const [wx, wy] = projectForOverlay(wl.coordinates);
+      const fs = wl.kind === "SEA" ? 18 : 13;
+      const w = estimateTextWidthPx(wl.name_zh, fs) * 1.25;
+      boxes.push({ id: `water-${wl.id}`, box: { x: wx - w / 2, y: wy - fs * 0.7, width: w, height: fs * 1.3 } });
+    }
+    return boxes;
+  }, [spineLabels, props.bundle.water_labels, projectForOverlay, liveView.zoom]);
+
   const labelReport = useMemo(
     () =>
       evaluateToponymLayout({
@@ -172,16 +189,20 @@ export function MapCanvas(props: MapCanvasProps) {
         center: liveView.center,
         zoom: liveView.zoom,
         viewport: viewportSize,
+        current_jdn: props.currentJdn ?? props.bundle.epoch.valid_from_jdn,
+        obstacle_boxes: obstacleBoxes,
         projectPoint: projectForOverlay,
       }),
     [
       props.bundle.toponyms,
+      props.bundle.epoch.valid_from_jdn,
+      props.currentJdn,
       props.stylePack.typography,
       liveView.center,
       liveView.zoom,
       viewportSize,
+      obstacleBoxes,
       projectForOverlay,
-      liveFrameTick,
     ],
   );
 
@@ -196,17 +217,45 @@ export function MapCanvas(props: MapCanvasProps) {
       const rect = entries[0]?.contentRect;
       if (rect && rect.width > 0 && rect.height > 0) {
         setViewportSize({ width: Math.round(rect.width), height: Math.round(rect.height) });
+        const map = mapRef.current;
+        if (map && !webglFallback) {
+          map.resize();
+          if (!userNavigatedRef.current && map.getZoom() <= 4.15) {
+            fitOverviewBounds(map);
+          }
+          const c = map.getCenter();
+          setLiveView({
+            center: [c.lng, c.lat],
+            zoom: map.getZoom(),
+            bearing_deg: map.getBearing(),
+            pitch_deg: map.getPitch(),
+          });
+          setLiveFrameTick((t) => t + 1);
+        }
       }
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [fitOverviewBounds, webglFallback]);
+
+  // Font readiness signal (honest check instead of constant true)
+  useEffect(() => {
+    if (typeof document === "undefined" || !("fonts" in document)) {
+      props.bridge.setSignals({ fonts_loaded: true });
+      return;
+    }
+    props.bridge.setSignals({ fonts_loaded: document.fonts.status === "loaded" });
+    void document.fonts.ready.then(() => {
+      props.bridge.setSignals({ fonts_loaded: document.fonts.status === "loaded" || document.fonts.size > 0 });
+    });
+  }, [props.bridge]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const graticule = buildGraticuleGeoJson();
+    const worldPoly = buildFullWorldPolygonGeoJson();
     const shaderLayer = new BorderShaderWebGLLayer((ready) => {
       props.bridge.setSignals({ shaders_ready: ready });
     });
@@ -221,40 +270,27 @@ export function MapCanvas(props: MapCanvasProps) {
         zoom: props.camera.zoom,
         bearing: props.camera.bearing_deg,
         pitch: props.camera.pitch_deg,
+        canvasContextAttributes: { preserveDrawingBuffer: true },
         attributionControl: false,
         style: {
           version: 8,
           sources: {
-            "basemap-raster": {
-              type: "raster",
-              tiles: [basemapTheme.tileUrl],
-              tileSize: 256,
-              maxzoom: 12,
-            },
-            "terrain-dem-src": {
-              type: "raster-dem",
-              tiles: AWS_TERRARIUM_DEM_TILES,
-              encoding: "terrarium",
-              tileSize: 256,
-              maxzoom: 12,
-            },
+            "basemap-raster": { type: "raster", tiles: [basemapTheme.tileUrl], tileSize: 256, maxzoom: 12 },
+            "terrain-dem-src": { type: "raster-dem", tiles: AWS_TERRARIUM_DEM_TILES, encoding: "terrarium", tileSize: 256, maxzoom: 12 },
+            "full-world-src": { type: "geojson", data: worldPoly },
             "ne-ocean-src": { type: "geojson", data: "/gis/ocean.geojson" },
             "ne-lakes-src": { type: "geojson", data: "/gis/lakes.geojson" },
             "ne-rivers-src": { type: "geojson", data: "/gis/rivers.geojson" },
             "ne-modern-borders-src": { type: "geojson", data: "/gis/modern_borders.geojson" },
             "graticule-src": { type: "geojson", data: graticule },
             "ghost-border-src": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-            "paleo-geo-src": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+            "paleo-lines-src": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+            "paleo-polys-src": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
             "territories-src": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
             "boundaries-src": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-            "marching-src": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           },
           layers: [
-            {
-              id: "bg-base",
-              type: "background",
-              paint: { "background-color": basemapTheme.bgHex },
-            },
+            { id: "bg-base", type: "background", paint: { "background-color": basemapTheme.bgHex } },
             {
               id: "basemap-layer",
               type: "raster",
@@ -268,15 +304,7 @@ export function MapCanvas(props: MapCanvasProps) {
                 "raster-hue-rotate": basemapTheme.rasterHueRotate,
               },
             },
-            {
-              id: "territories-fill",
-              type: "fill",
-              source: "territories-src",
-              paint: {
-                "fill-color": ["get", "fill_hex"],
-                "fill-opacity": ["get", "fill_opacity"],
-              },
-            },
+            // Relief hillshade stays beneath territory fills & parchment so terrain depth never washes out polity tones
             {
               id: "terrain-hillshade-overlay",
               type: "hillshade",
@@ -289,33 +317,53 @@ export function MapCanvas(props: MapCanvasProps) {
               },
             },
             {
+              id: "parchment-overlay",
+              type: "fill",
+              source: "full-world-src",
+              paint: { "fill-opacity": basemapTheme.parchmentOpacity },
+            },
+            {
+              id: "territories-fill",
+              type: "fill",
+              source: "territories-src",
+              paint: { "fill-color": ["get", "fill_hex"], "fill-opacity": ["get", "fill_opacity"] },
+            },
+            {
+              id: "territories-credibility-fill",
+              type: "fill",
+              source: "territories-src",
+              paint: { "fill-color": ["get", "credibility_hex"], "fill-opacity": ["get", "credibility_opacity"] },
+            },
+            {
               id: "territories-disputed-outline",
               type: "line",
               source: "territories-src",
               filter: ["==", ["get", "is_disputed"], 1],
-              paint: {
-                "line-color": "#f59e0b",
-                "line-width": 2.4,
-                "line-dasharray": [4, 3],
-              },
+              paint: { "line-color": "#f59e0b", "line-width": 2.4, "line-dasharray": [4, 3] },
             },
             {
-              id: "territories-control-isopleth",
+              id: "territories-control-isopleth-dotted",
               type: "line",
               source: "territories-src",
-              layout: {
-                visibility:
-                  props.layerConfig.base_mode === "CONTROL_INTENSITY"
-                  && props.layerConfig.control_intensity_render_mode === "CLOSED_ISOPLETH_CONTOURS"
-                    ? "visible"
-                    : "none",
-              },
-              paint: {
-                "line-color": "#0f172a",
-                "line-width": 1.4,
-                "line-dasharray": [3, 3],
-                "line-opacity": 0.72,
-              },
+              filter: ["==", ["get", "contour_style"], "dotted"],
+              layout: { visibility: "none" },
+              paint: { "line-color": "#0f172a", "line-width": 1.3, "line-dasharray": [2, 4], "line-opacity": 0.72 },
+            },
+            {
+              id: "territories-control-isopleth-dashed",
+              type: "line",
+              source: "territories-src",
+              filter: ["==", ["get", "contour_style"], "dashed"],
+              layout: { visibility: "none" },
+              paint: { "line-color": "#0f172a", "line-width": 1.5, "line-dasharray": [5, 3], "line-opacity": 0.78 },
+            },
+            {
+              id: "territories-control-isopleth-long",
+              type: "line",
+              source: "territories-src",
+              filter: ["==", ["get", "contour_style"], "long"],
+              layout: { visibility: "none" },
+              paint: { "line-color": "#0f172a", "line-width": 1.8, "line-dasharray": [10, 2], "line-opacity": 0.85 },
             },
             {
               id: "graticule-layer",
@@ -335,118 +383,105 @@ export function MapCanvas(props: MapCanvasProps) {
               },
             },
             {
-              id: "paleo-geo-layer",
+              id: "paleo-geo-fill",
+              type: "fill",
+              source: "paleo-polys-src",
+              paint: { "fill-color": "#2563eb", "fill-opacity": 0.24 },
+            },
+            {
+              id: "paleo-geo-line",
               type: "line",
-              source: "paleo-geo-src",
+              source: "paleo-lines-src",
               paint: {
-                "line-color": ["match", ["get", "feature_type"], "SILK_ROAD", "#b45309", "#1d4ed8"],
-                "line-width": ["match", ["get", "feature_type"], "SILK_ROAD", 1.8, 2.2],
+                "line-color": ["match", ["get", "feature_type"], "SILK_ROAD", "#b45309", "ETHNIC_TRIBE", "#92400e", "#1d4ed8"],
+                "line-width": ["match", ["get", "feature_type"], "SILK_ROAD", 2.0, 2.4],
                 "line-dasharray": [3, 2],
-                "line-opacity": 0.85,
+                "line-opacity": 0.88,
               },
+            },
+            {
+              id: "admin-divisions-layer",
+              type: "line",
+              source: "boundaries-src",
+              filter: ["==", ["get", "is_same_polity_internal"], 1],
+              paint: { "line-color": "#334155", "line-width": ["get", "stroke_px"], "line-opacity": 0.56, "line-dasharray": [3, 2] },
             },
             {
               id: "boundaries-halo",
               type: "line",
               source: "boundaries-src",
-              paint: {
-                "line-color": "rgba(15, 23, 42, 0.38)",
-                "line-width": props.stylePack.border_shader.outer_stroke_width_px + 1.8,
-                "line-opacity": 0.75,
-              },
+              filter: ["==", ["get", "hide_in_pure"], 0],
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: { "line-color": "rgba(15, 23, 42, 0.36)", "line-width": props.stylePack.border_shader.outer_stroke_width_px + 1.8, "line-opacity": 0.75 },
             },
             {
-              id: "boundaries-outer",
+              id: "boundaries-outer-solid",
               type: "line",
               source: "boundaries-src",
-              paint: {
-                "line-color": props.stylePack.border_shader.outer_stroke_hex,
-                "line-width": props.stylePack.border_shader.outer_stroke_width_px,
-                "line-opacity": 0.96,
-              },
+              filter: ["all", ["==", ["get", "hide_in_pure"], 0], ["==", ["get", "certainty_key"], "solid"]],
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: { "line-color": props.stylePack.border_shader.outer_stroke_hex, "line-width": ["get", "stroke_px"], "line-opacity": 0.96 },
+            },
+            {
+              id: "boundaries-outer-approx",
+              type: "line",
+              source: "boundaries-src",
+              filter: ["all", ["==", ["get", "hide_in_pure"], 0], ["==", ["get", "certainty_key"], "approx"]],
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: { "line-color": props.stylePack.border_shader.outer_stroke_hex, "line-width": ["get", "stroke_px"], "line-dasharray": [4, 3], "line-opacity": 0.9 },
+            },
+            {
+              id: "boundaries-outer-disputed",
+              type: "line",
+              source: "boundaries-src",
+              filter: ["all", ["==", ["get", "hide_in_pure"], 0], ["==", ["get", "certainty_key"], "disputed"]],
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: { "line-color": "#f59e0b", "line-width": ["get", "stroke_px"], "line-dasharray": [2, 3], "line-opacity": 0.95 },
+            },
+            {
+              id: "battle-frontline-layer",
+              type: "line",
+              source: "boundaries-src",
+              filter: ["==", ["get", "is_frontline"], 1],
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: { "line-color": "#ef4444", "line-width": 4.2, "line-dasharray": [6, 2], "line-opacity": 0.92 },
+            },
+            {
+              id: "diff-highlight-arcs",
+              type: "line",
+              source: "boundaries-src",
+              filter: ["==", ["get", "is_diff_highlight"], 1],
+              paint: { "line-color": "#38bdf8", "line-width": 6.0, "line-opacity": 0.72 },
             },
             {
               id: "boundaries-locked",
               type: "line",
               source: "boundaries-src",
               filter: ["==", ["get", "human_locked"], 1],
-              paint: {
-                "line-color": "#fbbf24",
-                "line-width": 3.4,
-                "line-dasharray": [1.5, 1.5],
-              },
+              paint: { "line-color": "#fbbf24", "line-width": 3.4, "line-dasharray": [1.5, 1.5] },
             },
             {
               id: "ne-ocean-mask",
               type: "fill",
               source: "ne-ocean-src",
-              paint: {
-                "fill-color": basemapTheme.oceanFillHex,
-                "fill-opacity": props.stylePack.basemap.basemap_id === "satellite_natural" ? 0 : 0.96,
-              },
+              paint: { "fill-color": basemapTheme.oceanFillHex, "fill-opacity": props.stylePack.basemap.basemap_id === "satellite_natural" ? 0 : 0.96 },
             },
-            {
-              id: "ne-ocean-shoreline",
-              type: "line",
-              source: "ne-ocean-src",
-              paint: {
-                "line-color": basemapTheme.shorelineHex,
-                "line-width": 1.35,
-                "line-opacity": 0.94,
-              },
-            },
+            { id: "ne-ocean-shoreline", type: "line", source: "ne-ocean-src", paint: { "line-color": basemapTheme.shorelineHex, "line-width": 1.35, "line-opacity": 0.94 } },
             {
               id: "ne-lakes-mask",
               type: "fill",
               source: "ne-lakes-src",
-              paint: {
-                "fill-color": basemapTheme.oceanFillHex,
-                "fill-opacity": props.stylePack.basemap.basemap_id === "satellite_natural" ? 0 : 0.96,
-              },
+              paint: { "fill-color": basemapTheme.oceanFillHex, "fill-opacity": props.stylePack.basemap.basemap_id === "satellite_natural" ? 0 : 0.96 },
             },
-            {
-              id: "ne-lakes-shoreline",
-              type: "line",
-              source: "ne-lakes-src",
-              paint: {
-                "line-color": basemapTheme.shorelineHex,
-                "line-width": 1.25,
-                "line-opacity": 0.92,
-              },
-            },
+            { id: "ne-lakes-shoreline", type: "line", source: "ne-lakes-src", paint: { "line-color": basemapTheme.shorelineHex, "line-width": 1.25, "line-opacity": 0.92 } },
             {
               id: "modern-ref-layer",
               type: "line",
               source: "ne-modern-borders-src",
               layout: { visibility: props.stylePack.basemap.show_modern_overlay ? "visible" : "none" },
-              paint: {
-                "line-color": "#dc2626",
-                "line-width": 1.2,
-                "line-dasharray": [3, 2],
-                "line-opacity": 0.68,
-              },
+              paint: { "line-color": "#dc2626", "line-width": 1.2, "line-dasharray": [3, 2], "line-opacity": 0.68 },
             },
-            {
-              id: "ghost-border-layer",
-              type: "line",
-              source: "ghost-border-src",
-              paint: {
-                "line-color": "#e11d48",
-                "line-width": 2.2,
-                "line-dasharray": [5, 4],
-                "line-opacity": 0.8,
-              },
-            },
-            {
-              id: "marching-arrows-layer",
-              type: "line",
-              source: "marching-src",
-              paint: {
-                "line-color": ["get", "color_hex"],
-                "line-width": 3.4,
-                "line-dasharray": [4, 2],
-              },
-            },
+            { id: "ghost-border-layer", type: "line", source: "ghost-border-src", paint: { "line-color": "#e11d48", "line-width": 2.2, "line-dasharray": [5, 4], "line-opacity": 0.8 } },
           ],
         },
       });
@@ -457,27 +492,26 @@ export function MapCanvas(props: MapCanvasProps) {
     }
 
     mapRef.current = map;
+    props.onCanvasReady?.(() => {
+      try {
+        return map.getCanvas().toDataURL("image/png");
+      } catch {
+        return null;
+      }
+    });
 
     props.onRegisterAwaitIdle?.(async () => {
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
-          if (map.loaded() && map.isStyleLoaded() && map.areTilesLoaded()) {
-            resolve();
-          } else {
-            map.once("idle", () => resolve());
-          }
+          if (map.loaded() && map.isStyleLoaded() && map.areTilesLoaded()) resolve();
+          else map.once("idle", () => resolve());
         });
       });
     });
 
     const syncLiveFrame = () => {
       const c = map.getCenter();
-      setLiveView({
-        center: [c.lng, c.lat],
-        zoom: map.getZoom(),
-        bearing_deg: map.getBearing(),
-        pitch_deg: map.getPitch(),
-      });
+      setLiveView({ center: [c.lng, c.lat], zoom: map.getZoom(), bearing_deg: map.getBearing(), pitch_deg: map.getPitch() });
       setLiveFrameTick((t) => {
         const next = t + 1;
         props.onLiveFrameMove?.(next);
@@ -486,24 +520,45 @@ export function MapCanvas(props: MapCanvasProps) {
     };
 
     map.on("load", () => {
-      if (!map.getLayer(shaderLayer.id)) {
-        map.addLayer(shaderLayer, "terrain-hillshade-overlay");
+      currentTileUrlRef.current = basemapTheme.tileUrl;
+      if (!map.hasImage("parchment-grain")) {
+        map.addImage("parchment-grain", getParchmentPatternData());
+        if (map.getLayer("parchment-overlay")) {
+          map.setPaintProperty("parchment-overlay", "fill-pattern", "parchment-grain");
+        }
       }
+      if (!map.getLayer(shaderLayer.id)) {
+        map.addLayer(shaderLayer, "territories-fill");
+      }
+      setMapStyleReady(true);
+      fitOverviewBounds(map);
       syncLiveFrame();
-      props.bridge.setSignals({ map_idle: true, tiles_loaded: true, shaders_ready: true });
+      props.bridge.setSignals({
+        map_idle: true,
+        tiles_loaded: map.areTilesLoaded(),
+        shaders_ready: shaderLayer.isReady(),
+      });
     });
 
+    map.on("dragstart", () => {
+      userNavigatedRef.current = true;
+    });
+    map.on("wheel", () => {
+      userNavigatedRef.current = true;
+    });
     map.on("move", syncLiveFrame);
     map.on("zoom", syncLiveFrame);
     map.on("rotate", syncLiveFrame);
     map.on("pitch", syncLiveFrame);
     map.on("resize", syncLiveFrame);
-
     map.on("idle", () => {
-      props.bridge.setSignals({ map_idle: true, tiles_loaded: true });
+      props.bridge.setSignals({
+        map_idle: true,
+        tiles_loaded: map.areTilesLoaded(),
+        shaders_ready: shaderLayer.isReady(),
+      });
       syncLiveFrame();
     });
-
     map.on("moveend", () => {
       const c = map.getCenter();
       props.onCameraChange({
@@ -513,41 +568,53 @@ export function MapCanvas(props: MapCanvasProps) {
         pitch_deg: Number(map.getPitch().toFixed(1)),
       });
     });
-
-    map.on("click", "territories-fill", (ev) => {
-      const feature = ev.features?.[0];
-      const faceId = feature?.properties?.face_id as string | undefined;
-      const polityId = feature?.properties?.polity_id as string | undefined;
-      if (faceId) props.onSelectFace(faceId, polityId);
+    map.on("click", (ev) => {
+      const hitBox: [[number, number], [number, number]] = [
+        [ev.point.x - 4, ev.point.y - 4],
+        [ev.point.x + 4, ev.point.y + 4],
+      ];
+      const arcHits = map.queryRenderedFeatures(hitBox, {
+        layers: ["boundaries-outer-solid", "boundaries-outer-approx", "boundaries-outer-disputed", "admin-divisions-layer"].filter(
+          (id) => Boolean(map.getLayer(id)),
+        ),
+      });
+      const hitArcId = arcHits[0]?.properties?.arc_id as string | undefined;
+      if (hitArcId) {
+        onSelectArcRef.current?.(hitArcId);
+        return;
+      }
+      if (map.getLayer("territories-fill")) {
+        const faceHits = map.queryRenderedFeatures(ev.point, { layers: ["territories-fill"] });
+        const topFeature = faceHits[0];
+        const faceId = topFeature?.properties?.face_id as string | undefined;
+        const polityId = topFeature?.properties?.polity_id as string | undefined;
+        if (faceId) onSelectFaceRef.current(faceId, polityId);
+      }
     });
-
-    map.on("error", () => {
-      // Do not force fallback on transient tile request warnings; keep real MapLibre active
+    map.on("error", (ev) => {
+      const msg = ev?.error?.message;
+      if (msg) props.onMapError?.(msg);
     });
 
     return () => {
+      setMapStyleReady(false);
       map.remove();
       mapRef.current = null;
     };
   }, []);
 
-  // Synchronize real GIS basemap tiles, hillshade, shaders, snapshot, and overlays
+  // Synchronize basemap, shader buffers, merged borders, paleo overrides, and layers
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || webglFallback) return;
+    if (!map || webglFallback || !mapStyleReady) return;
 
     const rasterSrc = map.getSource("basemap-raster") as maplibregl.RasterTileSource | undefined;
-    if (
-      rasterSrc
-      && currentBasemapIdRef.current !== props.stylePack.basemap.basemap_id
-      && typeof rasterSrc.setTiles === "function"
-    ) {
-      currentBasemapIdRef.current = props.stylePack.basemap.basemap_id;
+    if (rasterSrc && currentTileUrlRef.current !== basemapTheme.tileUrl && typeof rasterSrc.setTiles === "function") {
+      currentTileUrlRef.current = basemapTheme.tileUrl;
       rasterSrc.setTiles([basemapTheme.tileUrl]);
     }
-    if (map.getLayer("bg-base")) {
-      map.setPaintProperty("bg-base", "background-color", basemapTheme.bgHex);
-    }
+
+    if (map.getLayer("bg-base")) map.setPaintProperty("bg-base", "background-color", basemapTheme.bgHex);
     if (map.getLayer("basemap-layer")) {
       map.setPaintProperty("basemap-layer", "raster-opacity", basemapTheme.rasterOpacity);
       map.setPaintProperty("basemap-layer", "raster-saturation", basemapTheme.rasterSaturation);
@@ -555,6 +622,9 @@ export function MapCanvas(props: MapCanvasProps) {
       map.setPaintProperty("basemap-layer", "raster-brightness-max", basemapTheme.rasterBrightnessMax);
       map.setPaintProperty("basemap-layer", "raster-contrast", basemapTheme.rasterContrast);
       map.setPaintProperty("basemap-layer", "raster-hue-rotate", basemapTheme.rasterHueRotate);
+    }
+    if (map.getLayer("parchment-overlay")) {
+      map.setPaintProperty("parchment-overlay", "fill-opacity", basemapTheme.parchmentOpacity);
     }
     if (map.getLayer("terrain-hillshade-overlay")) {
       map.setPaintProperty("terrain-hillshade-overlay", "hillshade-exaggeration", basemapTheme.hillshadeExaggerationBoost);
@@ -571,14 +641,13 @@ export function MapCanvas(props: MapCanvasProps) {
       map.setPaintProperty("ne-lakes-mask", "fill-color", basemapTheme.oceanFillHex);
       map.setPaintProperty("ne-lakes-mask", "fill-opacity", waterMaskOpacity);
     }
-    if (map.getLayer("ne-ocean-shoreline")) {
-      map.setPaintProperty("ne-ocean-shoreline", "line-color", basemapTheme.shorelineHex);
-    }
-    if (map.getLayer("ne-lakes-shoreline")) {
-      map.setPaintProperty("ne-lakes-shoreline", "line-color", basemapTheme.shorelineHex);
-    }
+    if (map.getLayer("ne-ocean-shoreline")) map.setPaintProperty("ne-ocean-shoreline", "line-color", basemapTheme.shorelineHex);
+    if (map.getLayer("ne-lakes-shoreline")) map.setPaintProperty("ne-lakes-shoreline", "line-color", basemapTheme.shorelineHex);
     if (map.getLayer("ne-rivers-layer")) {
       map.setPaintProperty("ne-rivers-layer", "line-color", basemapTheme.riverHex);
+      const paleoActive = props.layerConfig.enabled_overlays.includes("physical_paleo_geo");
+      const suppressed = paleoActive ? (props.bundle.superseded_modern_rivers ?? []) : [];
+      map.setFilter("ne-rivers-layer", suppressed.length > 0 ? ["!", ["in", ["get", "name"], ["literal", suppressed]]] : null);
     }
     if (map.getLayer("graticule-layer")) {
       map.setLayoutProperty("graticule-layer", "visibility", props.stylePack.basemap.show_graticule_grid ? "visible" : "none");
@@ -588,97 +657,125 @@ export function MapCanvas(props: MapCanvasProps) {
     }
 
     const territoryFC = buildTerritoryRenderCollection(
-      props.displaySnapshot,
+      effectiveSnapshot,
       props.bundle,
       props.stylePack,
       props.layerConfig,
       props.polityColors,
-      props.spotlightPolityId,
+      {
+        spotlightPolityId: props.spotlightPolityId,
+        opacityMultiplier: props.opacityMultiplier ?? 1,
+        saturationMultiplier: props.saturationMultiplier ?? 1,
+      },
     );
     (map.getSource("territories-src") as maplibregl.GeoJSONSource | undefined)?.setData(territoryFC);
 
-    const lockedArcIds = new Set(
-      props.bundle.canonical_arcs.filter((a) => a.human_locked_override).map((a) => a.arc_id),
+    const diffArcSet = new Set(props.bundle.diff_record?.affected_arc_ids ?? []);
+    const boundariesFC = buildBoundaryRenderCollection(
+      effectiveSnapshot,
+      props.bundle,
+      props.stylePack,
+      props.layerConfig,
+      diffArcSet,
     );
-    const boundariesFC: FeatureCollection<LineString> = {
-      type: "FeatureCollection",
-      features: props.displaySnapshot.boundaries.features.map((f) => ({
-        ...f,
-        properties: {
-          ...f.properties,
-          human_locked: lockedArcIds.has(f.properties.arc_id) ? 1 : 0,
-        },
-      })),
-    };
     (map.getSource("boundaries-src") as maplibregl.GeoJSONSource | undefined)?.setData(boundariesFC);
 
-    if (map.getLayer("boundaries-outer")) {
-      map.setPaintProperty("boundaries-outer", "line-color", props.stylePack.border_shader.outer_stroke_hex);
-      map.setPaintProperty("boundaries-outer", "line-width", props.stylePack.border_shader.outer_stroke_width_px);
+    for (const bid of ["boundaries-outer-solid", "boundaries-outer-approx"]) {
+      if (map.getLayer(bid)) {
+        map.setPaintProperty(bid, "line-color", props.stylePack.border_shader.outer_stroke_hex);
+      }
     }
     if (map.getLayer("boundaries-halo")) {
       map.setPaintProperty("boundaries-halo", "line-width", props.stylePack.border_shader.outer_stroke_width_px + 1.8);
     }
-    if (map.getLayer("territories-control-isopleth")) {
-      const showIsopleth =
-        props.layerConfig.base_mode === "CONTROL_INTENSITY"
-        && props.layerConfig.control_intensity_render_mode === "CLOSED_ISOPLETH_CONTOURS";
-      map.setLayoutProperty("territories-control-isopleth", "visibility", showIsopleth ? "visible" : "none");
+
+    const showAdmin =
+      props.layerConfig.enabled_overlays.includes("admin_divisions")
+      || props.stylePack.border_shader.mode === "multi_tier_ink";
+    if (map.getLayer("admin-divisions-layer")) {
+      map.setLayoutProperty("admin-divisions-layer", "visibility", showAdmin ? "visible" : "none");
+    }
+
+    const showIsopleth =
+      props.layerConfig.base_mode === "CONTROL_INTENSITY"
+      && props.layerConfig.control_intensity_render_mode === "CLOSED_ISOPLETH_CONTOURS";
+    for (const lid of [
+      "territories-control-isopleth-dotted",
+      "territories-control-isopleth-dashed",
+      "territories-control-isopleth-long",
+    ]) {
+      if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", showIsopleth ? "visible" : "none");
     }
 
     const ghostData: FeatureCollection<LineString> =
-      props.showGhostBorder && props.ghostSnapshot
-        ? props.ghostSnapshot.boundaries
-        : { type: "FeatureCollection", features: [] };
+      props.showGhostBorder && props.ghostSnapshot ? props.ghostSnapshot.boundaries : { type: "FeatureCollection", features: [] };
     (map.getSource("ghost-border-src") as maplibregl.GeoJSONSource | undefined)?.setData(ghostData);
 
-    const paleoEnabled = props.layerConfig.enabled_overlays.includes("physical_paleo_geo");
-    const paleoData: FeatureCollection<LineString | Polygon> = {
-      type: "FeatureCollection",
-      features: paleoEnabled
-        ? props.bundle.paleo_overlays.map((p) => ({
-            type: "Feature",
-            id: p.feature_id,
-            geometry: p.geometry,
-            properties: { feature_type: p.feature_type, label_zh: p.label_zh },
-          }))
-        : [],
-    };
-    (map.getSource("paleo-geo-src") as maplibregl.GeoJSONSource | undefined)?.setData(paleoData);
-
-    const eventsEnabled = props.layerConfig.enabled_overlays.includes("historical_events");
-    const marchData: FeatureCollection<LineString> = {
-      type: "FeatureCollection",
-      features: eventsEnabled
-        ? props.bundle.marching_routes.map((r) => ({
-            type: "Feature",
-            id: r.route_id,
-            geometry: { type: "LineString", coordinates: r.coordinates },
-            properties: { color_hex: r.color_hex, label_zh: r.label_zh },
-          }))
-        : [],
-    };
-    (map.getSource("marching-src") as maplibregl.GeoJSONSource | undefined)?.setData(marchData);
+    const paleo = buildPaleoAndCustomCollections(props.bundle, props.layerConfig);
+    (map.getSource("paleo-lines-src") as maplibregl.GeoJSONSource | undefined)?.setData(paleo.lines);
+    (map.getSource("paleo-polys-src") as maplibregl.GeoJSONSource | undefined)?.setData(paleo.polygons);
 
     if (shaderLayerRef.current) {
-      const ribbons = props.displaySnapshot.territories.features.map((feat) => {
-        const pid = feat.properties.polity_id ?? feat.properties.face_id;
-        const hex = props.polityColors[pid] ?? "#2dbd66";
-        return buildInwardRibbonBuffer(feat.geometry.coordinates, hexToRgb(hex), 0.3);
+      const bandPx = props.stylePack.border_shader.inner_band_width_px ?? 16;
+      const zoom = map.getZoom();
+      const perimeters =
+        props.layerConfig.base_mode === "PURE_TERRITORY"
+          ? extractPolityOuterPerimeterRings(effectiveSnapshot)
+          : effectiveSnapshot.territories.features.map((feat) => ({
+              polity_id: feat.properties.polity_id ?? feat.properties.face_id,
+              rings: [feat.geometry.coordinates[0] ?? []],
+            }));
+
+      const ribbonPolygons = perimeters.flatMap((entry) => {
+        const hex = props.polityColors[entry.polity_id] ?? "#2dbd66";
+        const rgb = hexToRgb(hex);
+        return entry.rings.map((ring) => buildConcaveSafeInwardRibbonBuffer(ring, rgb, zoom, bandPx));
       });
+
+      const hatchPolygons =
+        props.stylePack.border_shader.mode === "occupation_hatch_frontline"
+          ? effectiveSnapshot.territories.features
+              .filter(
+                (feat) =>
+                  feat.properties.zone_semantics === "DISPUTED_OVERLAP"
+                  || feat.properties.control_score < 65
+                  || feat.properties.polity_id === props.spotlightPolityId,
+              )
+              .map((feat) => {
+                const hex = props.polityColors[feat.properties.polity_id ?? feat.properties.face_id] ?? "#ef4444";
+                return buildPolygonHatchBuffer(feat.geometry.coordinates[0] ?? [], hexToRgb(hex));
+              })
+          : [];
+
+      const fillPolygons =
+        props.stylePack.basemap.blend_mode !== "normal"
+          ? territoryFC.features.map((feat) => {
+              const p = feat.properties as { fill_hex: string; webgl_target_opacity: number };
+              return buildTerritoryFillBuffer(
+                feat.geometry.coordinates[0] ?? [],
+                hexToRgb(p.fill_hex),
+                p.webgl_target_opacity ?? 0.65,
+              );
+            })
+          : [];
+
       shaderLayerRef.current.updateConfig({
         mode: props.stylePack.border_shader.mode,
+        blendMode: props.stylePack.basemap.blend_mode,
         opacity: props.stylePack.border_shader.inner_band_opacity ?? 0.42,
-        bandWidthPx: props.stylePack.border_shader.inner_band_width_px ?? 16,
+        bandWidthPx: bandPx,
         hatchAngleDeg: props.stylePack.border_shader.hatch_angle_deg ?? 45,
-        polygons: ribbons,
+        hatchSpacingPx: props.stylePack.border_shader.hatch_spacing_px ?? 9,
+        ribbonPolygons,
+        hatchPolygons,
+        fillPolygons,
       });
     }
 
-    props.bridge.setRevision(props.displaySnapshot.revision_id);
+    props.bridge.setRevision(effectiveSnapshot.revision_id);
     map.triggerRepaint();
   }, [
-    props.displaySnapshot,
+    effectiveSnapshot,
     props.ghostSnapshot,
     props.bundle,
     props.stylePack,
@@ -686,351 +783,164 @@ export function MapCanvas(props: MapCanvasProps) {
     props.polityColors,
     props.spotlightPolityId,
     props.showGhostBorder,
+    props.opacityMultiplier,
+    props.saturationMultiplier,
     basemapTheme,
     webglFallback,
+    mapStyleReady,
     props.bridge,
   ]);
 
-  // Synchronize external camera jumps (e.g. epoch switch or Director scrub)
+  // Synchronize external camera jumps (storyline presets / director playback)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || webglFallback) return;
     const c = map.getCenter();
-    const moved =
-      Math.abs(c.lng - props.camera.center[0]) > 0.01
-      || Math.abs(c.lat - props.camera.center[1]) > 0.01
-      || Math.abs(map.getZoom() - props.camera.zoom) > 0.05;
-    if (moved) {
+    const diff =
+      Math.abs(c.lng - props.camera.center[0])
+      + Math.abs(c.lat - props.camera.center[1])
+      + Math.abs(map.getZoom() - props.camera.zoom)
+      + Math.abs(map.getBearing() - props.camera.bearing_deg) * 0.05
+      + Math.abs(map.getPitch() - props.camera.pitch_deg) * 0.05;
+    if (diff > 0.015) {
       map.jumpTo({
         center: props.camera.center,
         zoom: props.camera.zoom,
         bearing: props.camera.bearing_deg,
         pitch: props.camera.pitch_deg,
       });
+    } else {
       setLiveView(props.camera);
-      setLiveFrameTick((t) => t + 1);
     }
-  }, [props.camera, webglFallback]);
+  }, [
+    props.camera.center[0],
+    props.camera.center[1],
+    props.camera.zoom,
+    props.camera.bearing_deg,
+    props.camera.pitch_deg,
+    webglFallback,
+  ]);
 
-  const spineLabels = useMemo(
-    () => buildPolitySpineLabels(props.displaySnapshot, props.bundle.polities, props.stylePack.typography),
-    [props.displaySnapshot, props.bundle.polities, props.stylePack.typography],
+  useEffect(() => {
+    if (!props.resetViewTick || webglFallback) return;
+    userNavigatedRef.current = false;
+    const map = mapRef.current;
+    if (map) {
+      map.resize();
+      fitOverviewBounds(map);
+    }
+  }, [props.resetViewTick, fitOverviewBounds, webglFallback]);
+
+  // Draggable curtain divider bar listeners
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (!draggingCurtainRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const next = Math.max(0.05, Math.min(0.95, (e.clientX - rect.left) / rect.width));
+      props.onCurtainRatioChange(Number(next.toFixed(3)));
+    };
+    const onUp = () => {
+      draggingCurtainRef.current = false;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [props.onCurtainRatioChange]);
+
+  const paleoMemo = useMemo(
+    () => buildPaleoAndCustomCollections(props.bundle, props.layerConfig),
+    [props.bundle, props.layerConfig],
   );
 
-  const isLightText = basemapTheme.isDark || props.stylePack.style_id === "vivid_video_songti" || props.stylePack.style_id === "alabaster_clay_focus" || props.stylePack.style_id === "tactical_war_parchment";
-
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <div ref={containerRef} className="map-container" style={{ background: basemapTheme.bgHex }} />
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: basemapTheme.bgHex }}>
+      <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
 
-      {/* 60fps real-time SVG cartographic layer: curved polity spines, water body labels, arrows */}
-      <svg
-        width={viewportSize.width}
-        height={viewportSize.height}
-        style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 5 }}
-      >
-        <defs>
-          <marker id="march-arrow-head" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#dc2626" stroke="#ffffff" strokeWidth="0.7" />
-          </marker>
-          {spineLabels.map((feat) => {
-            const pts = feat.geometry.coordinates.map((pt) => projectForOverlay([pt[0] ?? 0, pt[1] ?? 0]));
-            if (pts.length < 3) return null;
-            const d = `M ${pts[0]![0]} ${pts[0]![1]} Q ${pts[1]![0]} ${pts[1]![1]} ${pts[2]![0]} ${pts[2]![1]}`;
-            return <path key={feat.properties.polity_id} id={`spine-path-${feat.properties.polity_id}`} d={d} />;
-          })}
-        </defs>
+      <MapCurtainView
+        curtainMode={props.curtainMode}
+        curtainRatio={props.curtainRatio}
+        bundle={props.bundle}
+        displaySnapshot={effectiveSnapshot}
+        ghostSnapshot={props.ghostSnapshot}
+        stylePack={props.stylePack}
+        layerConfig={props.layerConfig}
+        polityColors={props.polityColors}
+        camera={liveView}
+        opacityMultiplier={props.opacityMultiplier}
+        saturationMultiplier={props.saturationMultiplier}
+      />
 
-        {webglFallback &&
-          props.displaySnapshot.territories.features.map((feat) => {
-            const ring = feat.geometry.coordinates[0] ?? [];
-            const ptsStr = ring
-              .map((pt) => projectForOverlay([pt[0] ?? 0, pt[1] ?? 0]))
-              .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
-              .join(" ");
-            const pid = feat.properties.polity_id ?? feat.properties.face_id;
-            const vis = evaluateControlScoreVisuals(
-              props.polityColors[pid] ?? "#2dbd66",
-              feat.properties.control_score,
-              props.stylePack.territory_rendering,
-              props.layerConfig.base_mode,
-            );
-            return (
-              <polygon
-                key={feat.properties.face_id}
-                points={ptsStr}
-                fill={vis.fill_hex}
-                fillOpacity={vis.fill_opacity}
-                stroke={props.stylePack.border_shader.outer_stroke_hex}
-                strokeWidth={props.stylePack.border_shader.outer_stroke_width_px}
-                style={{ pointerEvents: "auto", cursor: "pointer" }}
-                onClick={() => props.onSelectFace(feat.properties.face_id, feat.properties.polity_id)}
-              />
-            );
-          })}
-
-        {/* Curved smooth marching route vector arrows */}
-        {props.layerConfig.enabled_overlays.includes("historical_events") &&
-          props.bundle.marching_routes.map((route) => {
-            const screenPts = route.coordinates.map((c) => projectForOverlay(c));
-            if (screenPts.length < 2) return null;
-            const d = screenPts.map(([x, y], idx) => `${idx === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-            const bPt = route.battle_point ? projectForOverlay(route.battle_point) : null;
-            return (
-              <g key={`march-svg-${route.route_id}`}>
-                <path
-                  d={d}
-                  fill="none"
-                  stroke="#ffffff"
-                  strokeWidth={5.2}
-                  strokeLinecap="round"
-                  strokeOpacity={0.8}
-                />
-                <path
-                  d={d}
-                  fill="none"
-                  stroke={route.color_hex}
-                  strokeWidth={3.2}
-                  strokeLinecap="round"
-                  markerEnd="url(#march-arrow-head)"
-                />
-                {bPt && (
-                  <>
-                    <circle cx={bPt[0]} cy={bPt[1]} r={15} fill="none" stroke="#ef4444" strokeWidth={2} strokeOpacity={0.78} />
-                    <circle cx={bPt[0]} cy={bPt[1]} r={5.5} fill="#dc2626" stroke="#ffffff" strokeWidth={1.5} />
-                  </>
-                )}
-              </g>
-            );
-          })}
-
-        {/* Water body annotations (里海, 咸海, 伊塞克湖, 北海, 东海, 南海) synced at 60fps */}
-        {(props.bundle.water_labels ?? []).map((wl) => {
-          const [wx, wy] = projectForOverlay(wl.coordinates);
-          return (
-            <text
-              key={wl.id}
-              x={wx}
-              y={wy}
-              fill={basemapTheme.isDark ? "#94a3b8" : "#ffffff"}
-              stroke={basemapTheme.isDark ? "none" : "rgba(59, 68, 130, 0.55)"}
-              strokeWidth={2.2}
-              paintOrder="stroke"
-              fontFamily={props.stylePack.typography.polity_font}
-              fontSize={wl.kind === "SEA" ? 18 : 13}
-              fontWeight={600}
-              letterSpacing={3}
-              textAnchor="middle"
-            >
-              {wl.name_zh}
-            </text>
-          );
-        })}
-
-        {/* Curved Polity Titles tracking real-time projection */}
-        {spineLabels.map((feat) => {
-          const fontSize = Math.max(15, Math.min(24, 11 + liveView.zoom * 1.9));
-          return (
-            <text
-              key={`label-${feat.properties.polity_id}`}
-              fill={isLightText ? "#ffffff" : "#1f2937"}
-              stroke={isLightText ? "rgba(15, 23, 42, 0.85)" : "rgba(255, 255, 255, 0.72)"}
-              strokeWidth={isLightText ? 3.8 : 2.6}
-              paintOrder="stroke"
-              fontFamily={props.stylePack.typography.polity_font}
-              fontSize={fontSize}
-              fontWeight={700}
-              textAnchor="middle"
-            >
-              <textPath href={`#spine-path-${feat.properties.polity_id}`} startOffset="50%">
-                {feat.properties.label_text}
-              </textPath>
-            </text>
-          );
-        })}
-      </svg>
-
-      {/* Clipped Curtain Swipe Layer */}
       {props.curtainMode !== "NONE" && (
-        <svg
-          width={viewportSize.width}
-          height={viewportSize.height}
+        <div
+          role="slider"
+          aria-label="卷帘对比分割线"
+          aria-valuemin={5}
+          aria-valuemax={95}
+          aria-valuenow={Math.round(props.curtainRatio * 100)}
+          onPointerDown={() => {
+            draggingCurtainRef.current = true;
+          }}
           style={{
             position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            zIndex: 6,
-            clipPath: `inset(0 ${((1 - props.curtainRatio) * 100).toFixed(2)}% 0 0)`,
+            top: 0,
+            bottom: 0,
+            left: `${(props.curtainRatio * 100).toFixed(2)}%`,
+            width: 4,
+            marginLeft: -2,
+            background: "#38bdf8",
+            boxShadow: "0 0 8px rgba(15, 23, 42, 0.8)",
+            cursor: "ew-resize",
+            zIndex: 12,
           }}
         >
-          {(props.curtainMode === "BEFORE_AFTER" && props.ghostSnapshot
-            ? props.ghostSnapshot
-            : props.displaySnapshot
-          ).territories.features.map((feat) => {
-            const ring = feat.geometry.coordinates[0] ?? [];
-            const ptsStr = ring
-              .map((pt) => projectForOverlay([pt[0] ?? 0, pt[1] ?? 0]))
-              .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
-              .join(" ");
-            const pid = feat.properties.polity_id ?? feat.properties.face_id;
-            const leftMode = props.curtainMode === "PURE_VS_CONTROL" ? "PURE_TERRITORY" : props.layerConfig.base_mode;
-            const vis = evaluateControlScoreVisuals(
-              props.polityColors[pid] ?? "#2dbd66",
-              feat.properties.control_score,
-              props.stylePack.territory_rendering,
-              leftMode,
-            );
-            return (
-              <polygon
-                key={`curtain-left-${feat.properties.face_id}`}
-                points={ptsStr}
-                fill={vis.fill_hex}
-                fillOpacity={Math.min(0.92, vis.fill_opacity + 0.1)}
-                stroke="#f8fafc"
-                strokeWidth={1.6}
-                strokeDasharray={props.curtainMode === "BEFORE_AFTER" ? "4 3" : undefined}
-              />
-            );
-          })}
-        </svg>
-      )}
-
-      {/* Real-time 60fps City Markers supporting all 4 Symbol Packs + G5 collision filtering */}
-      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 8 }}>
-        {labelReport.placed
-          .filter((item) => item.visible)
-          .map((item) => {
-            const top = props.bundle.toponyms.find((t) => t.toponym_id === item.toponym_id);
-            if (!top) return null;
-            const pack = props.stylePack.typography.city_symbol_pack;
-            const isCap = item.entity_rank === "CAPITAL";
-            return (
-              <button
-                key={item.toponym_id}
-                type="button"
-                onClick={() => props.onSelectToponym(top)}
-                style={{
-                  position: "absolute",
-                  left: item.screen_x,
-                  top: item.screen_y,
-                  transform: "translate(-50%, -50%)",
-                  pointerEvents: "auto",
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
-                  cursor: "pointer",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 2,
-                }}
-              >
-                {pack === "BLUE_RING" && (
-                  <span
-                    style={{
-                      width: isCap ? 12 : 9,
-                      height: isCap ? 12 : 9,
-                      borderRadius: "50%",
-                      background: "#ffffff",
-                      border: isCap ? "2.8px solid #dc2626" : "2.4px solid #2563eb",
-                      boxShadow: "0 0 6px rgba(15, 23, 42, 0.55)",
-                    }}
-                  />
-                )}
-                {pack === "ANTIQUE_DOUBLE_RING" && (
-                  <span
-                    style={{
-                      width: isCap ? 12 : 9,
-                      height: isCap ? 12 : 9,
-                      borderRadius: "50%",
-                      background: "#fef3c7",
-                      border: "2px solid #78350f",
-                      outline: "1.5px solid #78350f",
-                      outlineOffset: 2,
-                    }}
-                  />
-                )}
-                {pack === "YELLOW_SQUARE" && (
-                  <span
-                    style={{
-                      width: isCap ? 10 : 8,
-                      height: isCap ? 10 : 8,
-                      background: "#facc15",
-                      border: "1.5px solid #1e293b",
-                    }}
-                  />
-                )}
-                <span
-                  style={{
-                    fontFamily: props.stylePack.typography.city_font,
-                    fontSize: isCap ? 11.5 : 10.5,
-                    fontWeight: isCap ? 700 : 600,
-                    padding: pack === "PILL_BADGE" ? "1px 5px" : "0 3px",
-                    borderRadius: pack === "PILL_BADGE" ? 999 : 3,
-                    background:
-                      pack === "PILL_BADGE"
-                        ? "rgba(15, 23, 42, 0.72)"
-                        : basemapTheme.isDark
-                          ? "rgba(15, 23, 42, 0.65)"
-                          : "rgba(255, 255, 255, 0.68)",
-                    color: pack === "PILL_BADGE" || basemapTheme.isDark ? "#f8fafc" : "#0f172a",
-                    border: pack === "PILL_BADGE" ? "1px solid rgba(255,255,255,0.28)" : "none",
-                    whiteSpace: "pre-line",
-                    textAlign: "center",
-                    lineHeight: 1.15,
-                    textShadow: pack === "PILL_BADGE" ? "0 1px 2px rgba(0,0,0,0.85)" : "none",
-                  }}
-                >
-                  {item.display_text}
-                </span>
-              </button>
-            );
-          })}
-      </div>
-
-      {/* Curtain Swipe Divider Overlay */}
-      {props.curtainMode !== "NONE" && (
-        <>
-          <div
+          <span
             style={{
               position: "absolute",
-              top: 12,
-              left: 12,
-              zIndex: 13,
-              padding: "4px 9px",
-              borderRadius: 6,
-              background: "rgba(15,23,42,0.85)",
-              fontSize: 11,
-              border: "1px solid rgba(255,255,255,0.22)",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              background: "#0f172a",
+              border: "2px solid #38bdf8",
+              color: "#f8fafc",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 10,
+              fontWeight: 700,
             }}
           >
-            {props.curtainMode === "BEFORE_AFTER"
-              ? `左侧: Before (${props.ghostSnapshot?.revision_id ?? "无"}) ｜ 右侧: After (${props.displaySnapshot.revision_id})`
-              : "左侧: 纯疆域模式 ｜ 右侧: 0–100 控制力梯度"}
-          </div>
-          <div
-            className="curtain-divider"
-            style={{ left: `${Math.round(props.curtainRatio * 100)}%` }}
-            onPointerDown={(e) => {
-              const parent = e.currentTarget.parentElement;
-              if (!parent) return;
-              const move = (ev: PointerEvent) => {
-                const rect = parent.getBoundingClientRect();
-                const ratio = Math.max(0.08, Math.min(0.92, (ev.clientX - rect.left) / rect.width));
-                props.onCurtainRatioChange(ratio);
-              };
-              const up = () => {
-                window.removeEventListener("pointermove", move);
-                window.removeEventListener("pointerup", up);
-              };
-              window.addEventListener("pointermove", move);
-              window.addEventListener("pointerup", up);
-            }}
-          >
-            <div className="curtain-handle">⇄ 卷帘对比</div>
-          </div>
-        </>
+            ⇄
+          </span>
+        </div>
       )}
+
+      <MapSvgOverlay
+        bundle={props.bundle}
+        snapshot={effectiveSnapshot}
+        stylePack={props.stylePack}
+        layerConfig={props.layerConfig}
+        polityColors={props.polityColors}
+        viewportSize={viewportSize}
+        liveZoom={liveView.zoom}
+        basemapIsDark={basemapTheme.isDark}
+        webglFallback={webglFallback}
+        spineLabels={spineLabels}
+        placedToponyms={labelReport.placed}
+        affectedToponymIds={props.bundle.diff_record?.affected_toponym_ids ?? []}
+        adminUnits={props.bundle.admin_units}
+        paleoLabels={paleoMemo.labels}
+        morphVisual={props.morphVisual}
+        projectCoord={projectForOverlay}
+        onSelectFace={props.onSelectFace}
+        onSelectToponym={props.onSelectToponym}
+        {...(props.onSelectEventId ? { onSelectEventId: props.onSelectEventId } : {})}
+      />
     </div>
   );
 }

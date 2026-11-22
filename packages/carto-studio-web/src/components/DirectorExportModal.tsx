@@ -1,22 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
+  ComposableStylePack,
   DirectorKeyframe,
+  MapSnapshot,
   VideoExportJobSpec,
 } from "@historical-cartography/shared-schema";
 import type { EpochSceneBundle } from "../core/data/demo-types.ts";
-import {
-  classifyTopologyTransition,
-  type AspectSafeAreaLayout,
-  type HudWidgetSpec,
-} from "../core/director/recorder-and-hud.ts";
+import { classifyTopologyTransition } from "../core/director/morph-engine.ts";
+import type { AspectSafeAreaLayout, HudWidgetSpec } from "../core/director/recorder-and-hud.ts";
 import type {
   DeterministicFaultFlags,
   DeterministicFrameBridge,
   StepFrameResult,
 } from "../core/render/deterministic-bridge.ts";
+import {
+  downloadTextOrDataUrl,
+  generateSrtSubtitles,
+  generateStandaloneSvgExport,
+  generateT1BibliographyMarkdown,
+  generateVideoChaptersTxt,
+} from "./export-generators.ts";
 
 export interface DirectorExportModalProps {
   bundle: EpochSceneBundle;
+  displaySnapshot: MapSnapshot;
+  stylePack: ComposableStylePack;
+  polityColors: Record<string, string>;
   keyframes: DirectorKeyframe[];
   hudWidgets: HudWidgetSpec[];
   hudLayout: AspectSafeAreaLayout;
@@ -25,16 +34,17 @@ export interface DirectorExportModalProps {
   autoReflowVertical: boolean;
   showSafeGuides: boolean;
   telemetryCount: number;
+  audioNarrationUri: string;
   bridge: DeterministicFrameBridge;
+  captureMapPng?: (() => string | null) | undefined;
   onToggleHudType: (type: string) => void;
   onChangeAspectRatio: (ratio: VideoExportJobSpec["aspect_ratio"]) => void;
   onToggleAutoReflowVertical: () => void;
   onToggleSafeGuides: () => void;
+  onChangeAudioNarrationUri: (uri: string) => void;
   onGenerateStoryboardFromEvents: (scriptLines: string[]) => void;
-  onUpdateKeyframeFallback: (
-    keyframeId: string,
-    fallback: NonNullable<DirectorKeyframe["topology_change_fallback"]>,
-  ) => void;
+  onUpdateKeyframe: (keyframeId: string, patch: Partial<DirectorKeyframe>) => void;
+  onUpdateHudWidget: (widgetId: string, patch: Partial<HudWidgetSpec>) => void;
   onPreviewKeyframe: (kf: DirectorKeyframe) => void;
   onClose: () => void;
 }
@@ -55,23 +65,29 @@ export function DirectorExportModal(props: DirectorExportModalProps) {
   const [outputFormat, setOutputFormat] = useState<VideoExportJobSpec["output_format"]>("MP4_H264");
   const [autoSrt, setAutoSrt] = useState(true);
   const [autoBib, setAutoBib] = useState(true);
-  const [scriptText, setScriptText] = useState(
-    "公元928年，德莱木军沿里海南岸推进。\n雷伊与加兹温易手，萨曼与齐亚尔边界重塑。",
-  );
+  const [scriptText, setScriptText] = useState("");
   const [faults, setFaults] = useState<DeterministicFaultFlags>({});
   const [stepResult, setStepResult] = useState<StepFrameResult | null>(null);
+  const [remoteJobId, setRemoteJobId] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<{
     state: "IDLE" | "BLOCKED" | "SUBMITTED";
     message: string;
     spec?: VideoExportJobSpec;
   }>({ state: "IDLE", message: "" });
 
+  useEffect(() => {
+    const defaultLines =
+      props.bundle.events.length > 0
+        ? props.bundle.events.map((e) => e.summary).join("\n")
+        : props.bundle.subtitle_default ?? `${props.bundle.historical_year_display} ${props.bundle.epoch_label_zh}`;
+    setScriptText(defaultLines);
+  }, [props.bundle.epoch.epoch_id, props.bundle.events, props.bundle.subtitle_default, props.bundle.historical_year_display, props.bundle.epoch_label_zh]);
+
   const transitionCheck = props.bundle.diff_record
-    ? classifyTopologyTransition(
-        props.bundle.diff_record.before_snapshot,
-        props.bundle.diff_record.after_snapshot,
-      )
+    ? classifyTopologyTransition(props.bundle.diff_record.before_snapshot, props.bundle.diff_record.after_snapshot)
     : null;
+
+  const apiBase = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_CARTO_API_BASE;
 
   const runDeterministicSmoke = async (overrideFaults?: DeterministicFaultFlags) => {
     const activeFaults = overrideFaults ?? faults;
@@ -100,13 +116,30 @@ export function DirectorExportModal(props: DirectorExportModalProps) {
       output_format: outputFormat,
       keyframes: props.keyframes,
       hud_widgets: activeWidgets,
+      ...(props.audioNarrationUri.trim() ? { audio_narration_uri: props.audioNarrationUri.trim() } : {}),
       auto_generate_srt: autoSrt,
       auto_generate_bibliography_credits: autoBib,
     };
 
+    if (apiBase) {
+      try {
+        const resp = await fetch(`${apiBase.replace(/\/$/, "")}/video-export-jobs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(spec),
+        });
+        if (resp.ok) {
+          const data = (await resp.json()) as { job_id?: string };
+          setRemoteJobId(data.job_id ?? `job-${Date.now()}`);
+        }
+      } catch {
+        // Fallback smoothly to local client export spec when backend renderer is offline
+      }
+    }
+
     setExportStatus({
       state: "SUBMITTED",
-      message: `已通过 G5 帧同步与安全区校验，生成 ${spec.aspect_ratio} ${spec.resolution} @ ${spec.fps}fps (${spec.output_format}) 导出规格。`,
+      message: `已通过 G5 帧同步与安全区校验，生成 ${spec.aspect_ratio} ${spec.resolution} @ ${spec.fps}fps (${spec.output_format}) 导出规格${remoteJobId ? ` · 远端任务 ${remoteJobId}` : ""}。`,
       spec,
     });
   };
@@ -115,264 +148,306 @@ export function DirectorExportModal(props: DirectorExportModalProps) {
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="视频导播室与确定性导出面板">
       <div className="modal-card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <strong style={{ fontSize: 15 }}>内置历史地图视频导播室 · 确定性导出 (G5)</strong>
+          <strong style={{ fontSize: 15 }}>内置历史地图视频导播室 · 确定性渲染与多格式导出 (G5)</strong>
           <button type="button" className="studio-btn" onClick={props.onClose}>
             关闭
           </button>
         </div>
 
-        {/* Storyboard & Telemetry Summary */}
+        {/* Script Storyboard & Narration Track */}
         <div className="panel-section">
           <h3 className="panel-title">
             <span>AI 文案自动导播 & 60Hz 遥测 ({props.telemetryCount} 帧样本 → {props.keyframes.length} 关键帧)</span>
           </h3>
-          <textarea
-            className="studio-input"
-            rows={2}
-            value={scriptText}
-            onChange={(e) => setScriptText(e.target.value)}
-          />
+          <textarea className="studio-input" rows={2} value={scriptText} onChange={(e) => setScriptText(e.target.value)} />
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              type="text"
+              className="studio-input"
+              style={{ flex: 1, minWidth: 220 }}
+              placeholder="配音音轨 URI（例：/audio/960-975-central-asia-narration.wav）"
+              value={props.audioNarrationUri}
+              onChange={(e) => props.onChangeAudioNarrationUri(e.target.value)}
+            />
             <button
               type="button"
               className="studio-btn active"
               onClick={() => props.onGenerateStoryboardFromEvents(scriptText.split(/\n+/).filter(Boolean))}
             >
-              依据时间轴事件与文案生成分镜
+              依据时间轴事件生成分镜
             </button>
-            {transitionCheck && (
-              <span className="badge-pill badge-t2">{transitionCheck.reason_zh}</span>
-            )}
+            {transitionCheck && <span className="badge-pill badge-t2">{transitionCheck.reason_zh}</span>}
           </div>
+        </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 130, overflowY: "auto" }}>
-            {props.keyframes.map((kf) => (
+        {/* Keyframes & HUD Windows Editor */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div className="panel-section" style={{ maxHeight: 220, overflowY: "auto" }}>
+            <h3 className="panel-title">关键帧编辑与拓扑非同胚回退</h3>
+            {props.keyframes.map((kf, idx) => (
               <div
                 key={kf.keyframe_id}
                 style={{
                   display: "flex",
-                  alignItems: "center",
                   justifyContent: "space-between",
-                  gap: 8,
+                  alignItems: "center",
+                  gap: 4,
                   fontSize: 11,
                   padding: "4px 6px",
-                  background: "rgba(15,23,42,0.7)",
                   borderRadius: 4,
+                  background: "rgba(15,23,42,0.7)",
                 }}
               >
-                <span>
-                  {kf.keyframe_id} · t={kf.video_time_sec}s · JDN {kf.historical_jdn.toFixed(1)} · zoom {kf.camera.zoom}
-                </span>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <select
-                    aria-label={`关键帧 ${kf.keyframe_id} 拓扑突变过渡`}
-                    className="studio-select"
-                    style={{ fontSize: 10, padding: "2px 5px" }}
-                    value={kf.topology_change_fallback ?? "OCCUPATION_RIPPLE"}
-                    onChange={(e) =>
-                      props.onUpdateKeyframeFallback(
-                        kf.keyframe_id,
-                        e.target.value as NonNullable<DirectorKeyframe["topology_change_fallback"]>,
-                      )
-                    }
-                  >
-                    <option value="OCCUPATION_RIPPLE">OCCUPATION_RIPPLE</option>
-                    <option value="WIPE_MASK">WIPE_MASK</option>
-                    <option value="CROSS_DISSOLVE">CROSS_DISSOLVE</option>
-                  </select>
-                  <button
-                    type="button"
-                    className="studio-btn"
-                    style={{ fontSize: 10, padding: "2px 6px" }}
-                    onClick={() => props.onPreviewKeyframe(kf)}
-                  >
-                    定位回放
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="studio-btn"
+                  style={{ padding: "1px 6px", fontSize: 10 }}
+                  onClick={() => props.onPreviewKeyframe(kf)}
+                >
+                  预览 KF{idx + 1}
+                </button>
+                <input
+                  type="number"
+                  step={0.5}
+                  min={0}
+                  className="studio-input"
+                  style={{ width: 52, padding: "1px 4px", fontSize: 10 }}
+                  value={kf.video_time_sec}
+                  onChange={(e) => props.onUpdateKeyframe(kf.keyframe_id, { video_time_sec: Math.max(0, Number(e.target.value)) })}
+                />
+                <select
+                  className="studio-select"
+                  style={{ padding: "1px 4px", fontSize: 10, width: 92 }}
+                  value={kf.easing}
+                  onChange={(e) => props.onUpdateKeyframe(kf.keyframe_id, { easing: e.target.value as DirectorKeyframe["easing"] })}
+                >
+                  <option value="LINEAR">LINEAR</option>
+                  <option value="EASE_IN_OUT_CUBIC">CUBIC</option>
+                  <option value="CAMERA_FLY_TO">FLY_TO</option>
+                </select>
+                <select
+                  className="studio-select"
+                  style={{ padding: "1px 4px", fontSize: 10, width: 105 }}
+                  value={kf.topology_change_fallback ?? "OCCUPATION_RIPPLE"}
+                  onChange={(e) =>
+                    props.onUpdateKeyframe(kf.keyframe_id, {
+                      topology_change_fallback: e.target.value as NonNullable<DirectorKeyframe["topology_change_fallback"]>,
+                    })
+                  }
+                >
+                  <option value="OCCUPATION_RIPPLE">波纹蚕食</option>
+                  <option value="WIPE_MASK">推进遮罩</option>
+                  <option value="CROSS_DISSOLVE">交叉淡入淡出</option>
+                </select>
               </div>
             ))}
           </div>
-        </div>
 
-        {/* 7 HUD Widgets & 9:16 Safe Area Controls */}
-        <div className="panel-section">
-          <h3 className="panel-title">
-            <span>7 类影视级 HUD 挂件与竖屏 9:16 安全区检查</span>
-            <span className={`badge-pill ${props.hudLayout.g5_hud_gate.passed ? "badge-t1" : "badge-error"}`}>
-              HUD 安全区 {props.hudLayout.g5_hud_gate.passed ? "PASS" : "VIOLATION"}
-            </span>
-          </h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 5, fontSize: 11 }}>
+          <div className="panel-section" style={{ maxHeight: 220, overflowY: "auto" }}>
+            <h3 className="panel-title">
+              <span>HUD 挂件安全区与时窗</span>
+              <span className={`badge-pill ${props.hudLayout.g5_hud_gate.passed ? "badge-t1" : "badge-error"}`}>
+                {props.hudLayout.g5_hud_gate.passed ? "安全区通过" : `${props.hudLayout.g5_hud_gate.issues.length} 冲突`}
+              </span>
+            </h3>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 11 }}>
+              {(["16:9", "9:16", "1:1", "21:9"] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className={`studio-btn ${props.aspectRatio === r ? "active" : ""}`}
+                  style={{ padding: "2px 7px", fontSize: 10 }}
+                  onClick={() => props.onChangeAspectRatio(r)}
+                >
+                  {r}
+                </button>
+              ))}
+              <label className="chip-row" style={{ fontSize: 10 }}>
+                <input type="checkbox" checked={props.autoReflowVertical} onChange={props.onToggleAutoReflowVertical} />
+                9:16避让
+              </label>
+              <label className="chip-row" style={{ fontSize: 10 }}>
+                <input type="checkbox" checked={props.showSafeGuides} onChange={props.onToggleSafeGuides} />
+                安全框
+              </label>
+            </div>
             {ALL_HUD_TYPES.map((item) => (
-              <label key={item.type} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <input
-                  type="checkbox"
-                  checked={props.enabledHudTypes.has(item.type)}
-                  onChange={() => props.onToggleHudType(item.type)}
-                />
+              <label key={item.type} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+                <input type="checkbox" checked={props.enabledHudTypes.has(item.type)} onChange={() => props.onToggleHudType(item.type)} />
                 <span>{item.label}</span>
               </label>
             ))}
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <input
-                type="checkbox"
-                checked={props.autoReflowVertical}
-                onChange={props.onToggleAutoReflowVertical}
-              />
-              <span>9:16 竖屏自动折叠/重排侧栏至安全区</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <input type="checkbox" checked={props.showSafeGuides} onChange={props.onToggleSafeGuides} />
-              <span>显示抖音/B站竖屏遮挡参考线</span>
-            </label>
+            {props.hudWidgets.filter((w) => w.type === "SUBTITLE_BAR").map((sub) => (
+              <div key={sub.widget_id} style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10 }}>
+                <input
+                  type="number"
+                  step={0.5}
+                  className="studio-input"
+                  style={{ width: 44, padding: "1px 3px", fontSize: 10 }}
+                  value={sub.visible_from_sec}
+                  onChange={(e) => props.onUpdateHudWidget(sub.widget_id, { visible_from_sec: Number(e.target.value) })}
+                />
+                <span>-</span>
+                <input
+                  type="number"
+                  step={0.5}
+                  className="studio-input"
+                  style={{ width: 44, padding: "1px 3px", fontSize: 10 }}
+                  value={sub.visible_to_sec}
+                  onChange={(e) => props.onUpdateHudWidget(sub.widget_id, { visible_to_sec: Number(e.target.value) })}
+                />
+                <input
+                  type="text"
+                  className="studio-input"
+                  style={{ flex: 1, padding: "1px 4px", fontSize: 10 }}
+                  value={(sub.data_binding.text as string | undefined) ?? ""}
+                  onChange={(e) =>
+                    props.onUpdateHudWidget(sub.widget_id, { data_binding: { ...sub.data_binding, text: e.target.value } })
+                  }
+                />
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* A-42 Deterministic Step-Frame & Fault Injection Verification */}
+        {/* Deterministic G5 Barrier + Multi-Format Real Exports */}
         <div className="panel-section">
           <h3 className="panel-title">
-            <span>确定性帧步进 (`window.__STEP_FRAME__`) 与 G5 故障注入测试 (A-42)</span>
+            <span>G5 帧栅栏故障演练 & 真实交付下载</span>
+            <button type="button" className="studio-btn" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => void runDeterministicSmoke(faults)}>
+              执行 `__STEP_FRAME__(1000ms)` 检核
+            </button>
           </h3>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <input
-                type="checkbox"
-                checked={Boolean(faults.force_map_not_idle)}
-                onChange={(e) => setFaults((f) => ({ ...f, force_map_not_idle: e.target.checked }))}
-              />
-              注入 map_idle=false
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11 }}>
+            <label className="chip-row">
               <input
                 type="checkbox"
                 checked={Boolean(faults.force_fonts_not_loaded)}
-                onChange={(e) => setFaults((f) => ({ ...f, force_fonts_not_loaded: e.target.checked }))}
+                onChange={(e) => {
+                  const next = { ...faults, force_fonts_not_loaded: e.target.checked };
+                  setFaults(next);
+                  props.bridge.setFaultFlags(next);
+                }}
               />
-              注入 fonts_loaded=false
+              注入字体未加载故障
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <label className="chip-row">
               <input
                 type="checkbox"
-                checked={Boolean(faults.force_shaders_not_ready)}
-                onChange={(e) => setFaults((f) => ({ ...f, force_shaders_not_ready: e.target.checked }))}
+                checked={Boolean(faults.force_tiles_incomplete)}
+                onChange={(e) => {
+                  const next = { ...faults, force_tiles_incomplete: e.target.checked };
+                  setFaults(next);
+                  props.bridge.setFaultFlags(next);
+                }}
               />
-              注入 shaders_ready=false
+              注入瓦片未完整到达故障
             </label>
-            <button type="button" className="studio-btn" onClick={() => void runDeterministicSmoke()}>
-              执行单帧 G5 校验
-            </button>
+            {stepResult && (
+              <span className={`badge-pill ${stepResult.accepted ? "badge-t1" : "badge-error"}`}>
+                {stepResult.accepted ? "READY · 栅栏全绿" : `BLOCKED: ${stepResult.g5_gate.issues.map((i) => i.code).join(",")}`}
+              </span>
+            )}
           </div>
-          {stepResult && (
-            <div
-              className="quote-box"
-              style={{ borderLeftColor: stepResult.accepted ? "#10b981" : "#ef4444" }}
-            >
-              <div>
-                帧 #{stepResult.frame_index} (t={stepResult.time_ms}ms, rev={stepResult.revision_id}) →{" "}
-                <strong>{stepResult.accepted ? "READY & PASSED" : "REJECTED BY G5"}</strong>
-              </div>
-              {!stepResult.accepted && (
-                <div style={{ color: "#fecaca", fontSize: 11 }}>
-                  {stepResult.g5_gate.issues.map((i) => `${i.code}: ${i.message}`).join("；")}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
 
-        {/* Export Job Configuration */}
-        <div className="panel-section">
-          <h3 className="panel-title">导出参数 (VideoExportJobSpec)</h3>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <select
-              aria-label="导出画幅"
-              className="studio-select"
-              value={props.aspectRatio}
-              onChange={(e) => props.onChangeAspectRatio(e.target.value as VideoExportJobSpec["aspect_ratio"])}
-            >
-              <option value="16:9">16:9 横屏</option>
-              <option value="9:16">9:16 竖屏</option>
-              <option value="1:1">1:1 方屏</option>
-              <option value="21:9">21:9 电影宽屏</option>
-            </select>
-
-            <select
-              aria-label="导出分辨率"
-              className="studio-select"
-              value={resolution}
-              onChange={(e) => setResolution(e.target.value as VideoExportJobSpec["resolution"])}
-            >
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+            <select className="studio-select" style={{ width: 90 }} value={resolution} onChange={(e) => setResolution(e.target.value as VideoExportJobSpec["resolution"])}>
               <option value="1080p">1080p</option>
               <option value="1440p">1440p</option>
               <option value="4K">4K</option>
             </select>
-
-            <select
-              aria-label="导出帧率"
-              className="studio-select"
-              value={fps}
-              onChange={(e) => setFps(Number(e.target.value) as VideoExportJobSpec["fps"])}
-            >
-              <option value={30}>30 fps</option>
-              <option value={60}>60 fps</option>
+            <select className="studio-select" style={{ width: 82 }} value={fps} onChange={(e) => setFps(Number(e.target.value) as VideoExportJobSpec["fps"])}>
+              <option value={30}>30fps</option>
+              <option value={60}>60fps</option>
             </select>
-
-            <select
-              aria-label="导出封装格式"
-              className="studio-select"
-              value={outputFormat}
-              onChange={(e) => setOutputFormat(e.target.value as VideoExportJobSpec["output_format"])}
-            >
+            <select className="studio-select" style={{ width: 155 }} value={outputFormat} onChange={(e) => setOutputFormat(e.target.value as VideoExportJobSpec["output_format"])}>
               <option value="MP4_H264">MP4 (H.264)</option>
               <option value="MP4_HEVC">MP4 (HEVC)</option>
-              <option value="WEBM_ALPHA">WebM (Alpha 透明分层)</option>
-              <option value="PRORES_4444">ProRes 4444 (Alpha 分层)</option>
-              <option value="INTERACTIVE_WEB_BUNDLE">交互式网页播放器包</option>
+              <option value="WEBM_ALPHA">WebM 透明通道</option>
+              <option value="PRORES_4444">ProRes 4444</option>
+              <option value="INTERACTIVE_WEB_BUNDLE">交互网页包</option>
             </select>
-
-            <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+            <label className="chip-row" style={{ fontSize: 11 }}>
               <input type="checkbox" checked={autoSrt} onChange={(e) => setAutoSrt(e.target.checked)} />
-              导出 .srt 字幕
+              SRT
             </label>
-            <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+            <label className="chip-row" style={{ fontSize: 11 }}>
               <input type="checkbox" checked={autoBib} onChange={(e) => setAutoBib(e.target.checked)} />
-              导出 T1 参考文献附录
+              T1致谢
             </label>
+            <button type="button" className="studio-btn primary" style={{ marginLeft: "auto" }} onClick={() => void handleSubmitExport()}>
+              校验证书并生成导出规格
+            </button>
+          </div>
 
-            <button type="button" className="studio-btn active" onClick={() => void handleSubmitExport()}>
-              校验并提交导出任务
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+            <button
+              type="button"
+              className="studio-btn"
+              onClick={() => {
+                const png = props.captureMapPng?.();
+                if (png) downloadTextOrDataUrl(`${props.bundle.epoch.epoch_id}.png`, png);
+              }}
+            >
+              下载高清 PNG 快照
+            </button>
+            <button
+              type="button"
+              className="studio-btn"
+              onClick={() =>
+                downloadTextOrDataUrl(
+                  `${props.bundle.epoch.epoch_id}.svg`,
+                  generateStandaloneSvgExport(props.bundle, props.displaySnapshot, props.stylePack, props.polityColors),
+                  "image/svg+xml",
+                )
+              }
+            >
+              下载矢量 SVG 地图
+            </button>
+            <button
+              type="button"
+              className="studio-btn"
+              onClick={() =>
+                downloadTextOrDataUrl(`${props.bundle.epoch.epoch_id}.srt`, generateSrtSubtitles(props.hudWidgets, props.bundle), "text/plain")
+              }
+            >
+              下载 .srt 字幕
+            </button>
+            <button
+              type="button"
+              className="studio-btn"
+              onClick={() =>
+                downloadTextOrDataUrl(`${props.bundle.epoch.epoch_id}-chapters.txt`, generateVideoChaptersTxt(props.keyframes, props.bundle), "text/plain")
+              }
+            >
+              下载章节时间轴
+            </button>
+            <button
+              type="button"
+              className="studio-btn"
+              onClick={() =>
+                downloadTextOrDataUrl(`${props.bundle.epoch.epoch_id}-t1-credits.md`, generateT1BibliographyMarkdown(props.bundle), "text/markdown")
+              }
+            >
+              下载 T1 文献致谢
             </button>
           </div>
 
           {exportStatus.state !== "IDLE" && (
-            <div
-              className="quote-box"
-              style={{ borderLeftColor: exportStatus.state === "BLOCKED" ? "#ef4444" : "#34d399" }}
-            >
+            <div className="quote-box" style={{ borderLeftColor: exportStatus.state === "BLOCKED" ? "#ef4444" : "#34d399" }}>
               <div>{exportStatus.message}</div>
               {exportStatus.spec && (
-                <pre style={{ margin: "6px 0 0", fontSize: 10, overflowX: "auto", color: "#93c5fd" }}>
-                  {JSON.stringify(
-                    {
-                      project_id: exportStatus.spec.project_id,
-                      aspect_ratio: exportStatus.spec.aspect_ratio,
-                      resolution: exportStatus.spec.resolution,
-                      fps: exportStatus.spec.fps,
-                      output_format: exportStatus.spec.output_format,
-                      keyframes_count: exportStatus.spec.keyframes.length,
-                      hud_widgets_count: exportStatus.spec.hud_widgets.length,
-                      artifacts: [
-                        `video.${outputFormat.toLowerCase()}`,
-                        ...(autoSrt ? ["subtitles.srt", "chapters.txt"] : []),
-                        ...(autoBib ? ["t1_bibliography_credits.json"] : []),
-                      ],
-                    },
-                    null,
-                    2,
-                  )}
-                </pre>
+                <button
+                  type="button"
+                  className="studio-btn"
+                  style={{ marginTop: 6, fontSize: 10 }}
+                  onClick={() =>
+                    downloadTextOrDataUrl(`${exportStatus.spec!.project_id}-job-spec.json`, JSON.stringify(exportStatus.spec, null, 2), "application/json")
+                  }
+                >
+                  下载完整 VideoExportJobSpec.json
+                </button>
               )}
             </div>
           )}
