@@ -12,7 +12,8 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.json",
     "test": "node --test \"packages/**/*.test.ts\"",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "test:scholar-topology": "node --test test/scholar-topology.integration.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
