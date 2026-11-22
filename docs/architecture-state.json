@@ -1,0 +1,103 @@
+{
+  "state_format_version": 1,
+  "updated_on": "2026-11-22",
+  "maintainer": "Codex",
+  "specification": {
+    "version": "4.0",
+    "url": "https://docs.google.com/document/d/1pT0K3gbotZX9EasapG4wbJ5LamzTw2QgvxuJ7JDkk6g/edit",
+    "canonical_schema_path": "packages/shared-schema/src/canonical.ts",
+    "canonical_schema_sha256": "877aa14aab81f2ec2d1e70e125d014463ea94d925759606d5c47faa1834faa3f"
+  },
+  "handoff_manual": "docs/多Agent分工与统一验收手册.md",
+  "baseline": {
+    "commit": null,
+    "integration_branch": null,
+    "status": "首个基线提交待建立。当前验证来自本地未提交工作树。"
+  },
+  "packages": {
+    "shared-schema": {
+      "owner": "Codex",
+      "phase": 0,
+      "status": "in_progress",
+      "implemented": ["Canonical Schema v4.0", "双纪年与日期精度工具", "硬门禁编号与结果类型"],
+      "remaining": ["形成基线提交", "干净检出复跑 A-00 和 A-01", "交付最小公共接口样例"]
+    },
+    "topo-core": {
+      "owner": "Codex",
+      "phase": 1,
+      "status": "planned",
+      "implemented": [],
+      "remaining": ["分纪元 PostGIS 拓扑", "共享弧段与平滑", "变更事务与门禁", "928 年黄金测试"]
+    },
+    "scholar-agent": {
+      "owner": "后端 AI 2",
+      "phase": 2,
+      "status": "planned",
+      "implemented": [],
+      "remaining": ["检索和导入", "OCR 页行索引", "信源分级", "引文核验与事件接口", "文献 MCP"]
+    },
+    "carto-studio-web": {
+      "owner": "Gemini",
+      "reviewer": "Claude",
+      "phase": 3,
+      "status": "planned",
+      "implemented": [],
+      "remaining": ["地图与图层", "风格与时间轴", "证据和差异界面", "导播和 HUD 编辑"]
+    },
+    "video-renderer": {
+      "owner": "Codex",
+      "phase": 4,
+      "status": "planned",
+      "implemented": [],
+      "remaining": ["分镜与遥测", "拓扑过渡", "确定性渲染及双画幅烟测", "FFmpeg 编码与发布资产"]
+    }
+  },
+  "latest_verification": [
+    {
+      "command": "npm run check",
+      "date": "2026-11-22",
+      "result": "PASS",
+      "environment": "本地 Windows，Node v24.19.0，npm 11.17.0",
+      "source": "未提交工作树",
+      "commit": null,
+      "summary": "TypeScript 类型检查通过，纪年测试 4 项通过。",
+      "input_sha256": {
+        "packages/shared-schema/src/canonical.ts": "877aa14aab81f2ec2d1e70e125d014463ea94d925759606d5c47faa1834faa3f",
+        "packages/shared-schema/src/historical-time.ts": "f7b7932d55e3f4aa594b9b84a983753ee8254d8548a9f4c6227dbd02a2b94061",
+        "packages/shared-schema/test/historical-time.test.ts": "eed4bbf1fa41498837e1058332573a92e2f9b5e204cd610f717485937244f70d"
+      },
+      "acceptance": "本地验证。A-00 和 A-01 的阶段签收待固定提交后复跑。"
+    }
+  ],
+  "hard_gate_acceptance": {
+    "G1": "NOT_RUN",
+    "G1.5": "NOT_RUN",
+    "G2": "NOT_RUN",
+    "G3": "NOT_RUN",
+    "G4": "NOT_RUN",
+    "G5": "NOT_RUN"
+  },
+  "open_items": [
+    {
+      "task_id": "C-00",
+      "owner": "Codex",
+      "status": "in_progress",
+      "next_action": "形成并记录首个基线提交，干净检出后复跑 npm run check，发布契约与最小接口样例。",
+      "acceptance_ids": ["A-00", "A-01"]
+    },
+    {
+      "task_id": "C-05",
+      "owner": "Codex",
+      "status": "planned",
+      "next_action": "与后端 AI 2 共同登记 928 年夹具的拓扑版本、真实史料版本和验收证据。",
+      "acceptance_ids": ["A-40", "A-50"]
+    }
+  ],
+  "next_tasks": [
+    {"task_id": "C-00", "owner": "Codex"},
+    {"task_id": "C-01", "owner": "Codex"},
+    {"task_id": "S-01", "owner": "后端 AI 2"},
+    {"task_id": "S-02", "owner": "后端 AI 2"},
+    {"task_id": "F-01", "owner": "Gemini"}
+  ]
+}
