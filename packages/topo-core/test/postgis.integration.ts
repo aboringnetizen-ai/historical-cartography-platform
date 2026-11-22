@@ -4,8 +4,8 @@ import { after, before, test } from "node:test";
 import pg from "pg";
 import type { LineString } from "geojson";
 import { createHistoricalTimestamp } from "@historical-cartography/shared-schema";
-import { createDraftTopologyRevision, migrateTopology, readMapSnapshot } from "../src/index.ts";
-import type { DraftFaceSeed, DraftTopologyInput } from "../src/index.ts";
+import { createDraftTopologyRevision, migrateTopology, readMapSnapshot, registerPaleoReference } from "../src/index.ts";
+import type { DraftFaceSeed, DraftTopologyInput, PaleoLineReference } from "../src/index.ts";
 
 const testDatabaseUrl = process.env.CARTOGRAPHY_TEST_DATABASE_URL;
 if (!testDatabaseUrl) {
@@ -53,19 +53,21 @@ function studyArea(): DraftTopologyInput {
 
 test("migrations are atomic and repeatable without repeating applied work", async () => {
   const readLedger = () => pool.query<{ filename: string; sha256: string }>(
-    "SELECT filename, sha256 FROM cartography_migrations.applied",
+    "SELECT filename, sha256 FROM cartography_migrations.applied ORDER BY filename",
   );
   const first = await readLedger();
-  assert.equal(first.rowCount, 1);
+  assert.deepEqual(first.rows.map(({ filename }) => filename), ["001_topology.sql", "002_paleo_references.sql"]);
   await migrateTopology(pool);
   assert.deepEqual((await readLedger()).rows, first.rows);
   assert.match(first.rows[0]?.sha256 ?? "", /^[0-9a-f]{64}$/);
 
-  await pool.query("UPDATE cartography_migrations.applied SET sha256 = 'unexpected'");
+  await pool.query("UPDATE cartography_migrations.applied SET sha256 = 'unexpected' WHERE filename = '001_topology.sql'");
   try {
     await assert.rejects(migrateTopology(pool), /Applied migration changed: 001_topology.sql/);
   } finally {
-    await pool.query("UPDATE cartography_migrations.applied SET sha256 = $1", [first.rows[0]?.sha256]);
+    await pool.query("UPDATE cartography_migrations.applied SET sha256 = $1 WHERE filename = '001_topology.sql'", [
+      first.rows[0]?.sha256,
+    ]);
   }
 });
 
@@ -167,4 +169,47 @@ test("declared coverage holes remain visible in the derived polygon", async () =
   });
   const snapshot = await readMapSnapshot(pool, { revision_id: revisionId, historical_jdn: year(931) });
   assert.equal(snapshot?.territories.features[0]?.geometry.coordinates.length, 2);
+});
+
+test("a paleo boundary uses the reference of its own epoch with zero deviation", async () => {
+  const olderEpoch = { epoch_id: "paleo-before", valid_from_jdn: year(940), valid_to_jdn: year(941) };
+  const currentEpoch = { epoch_id: "paleo-selected", valid_from_jdn: year(941), valid_to_jdn: year(942) };
+  const prior: PaleoLineReference = {
+    epoch: olderEpoch,
+    feature_id: "fixture-river",
+    source_doc_id: "older-engineering-fixture",
+    feature_kind: "RIVER",
+    geometry: line([[60.9, 36], [60.9, 38]]),
+  };
+  const reference: PaleoLineReference = {
+    ...prior,
+    epoch: currentEpoch,
+    source_doc_id: "current-engineering-fixture",
+    geometry: line([[61.2, 36], [61.15, 37], [61.3, 38]]),
+  };
+  await registerPaleoReference(pool, prior);
+  await registerPaleoReference(pool, { ...prior, feature_id: "older-only" });
+  await registerPaleoReference(pool, reference);
+  await registerPaleoReference(pool, reference);
+  await assert.rejects(registerPaleoReference(pool, { ...reference, source_doc_id: "changed-source" }), /is immutable/);
+
+  const input: DraftTopologyInput = { ...studyArea(), epoch: currentEpoch, internal_boundaries: [] };
+  await assert.rejects(createDraftTopologyRevision(pool, {
+    ...input, paleo_feature_ids: ["older-only"],
+  }), /unavailable in epoch paleo-selected/);
+
+  const revisionId = await createDraftTopologyRevision(pool, {
+    ...input, paleo_feature_ids: [reference.feature_id],
+  });
+  const snapshot = await readMapSnapshot(pool, { revision_id: revisionId, historical_jdn: year(941) });
+  const snapped = snapshot?.boundaries.features.filter(
+    ({ properties }) => properties.snapped_paleo_feature_id === reference.feature_id,
+  );
+  assert.equal(snapped?.length, 1);
+  assert.ok(snapped?.[0]);
+  const { rows } = await pool.query<{ distance: number }>(
+    "SELECT ST_HausdorffDistance(ST_GeomFromGeoJSON($1::jsonb), ST_GeomFromGeoJSON($2::jsonb)) AS distance",
+    [JSON.stringify(snapped[0].geometry), JSON.stringify(reference.geometry)],
+  );
+  assert.deepEqual(rows, [{ distance: 0 }]);
 });

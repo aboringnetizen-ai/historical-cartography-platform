@@ -19,6 +19,7 @@ export interface MapBoundaryProperties {
   end_node_id: string;
   left_face_id: string | null;
   right_face_id: string | null;
+  snapped_paleo_feature_id?: string;
 }
 
 export interface MapSnapshotRequest {
